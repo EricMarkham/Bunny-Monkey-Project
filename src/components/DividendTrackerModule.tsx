@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   TrendingUp,
   Plus,
@@ -35,9 +35,10 @@ import {
   USD_TO_CAD_RATE,
 } from '../utils/finance';
 import { DRIPGrowthAreaChart, MonthlyDividendBarChart } from './charts/CustomCharts';
+import { supabase } from '../lib/supabase';
 import {
-  insertOrUpdateHoldingInSupabase,
-  deleteHoldingFromSupabase,
+  mapHoldingToRow,
+  mapRowToHolding,
 } from '../services/supabaseService';
 
 interface DividendTrackerModuleProps {
@@ -56,6 +57,82 @@ export function DividendTrackerModule({ state, onUpdateState }: DividendTrackerM
   const [showAddHoldingModal, setShowAddHoldingModal] = useState(false);
   const [selectedAccountFilter, setSelectedAccountFilter] = useState<string>('all');
   const [selectedOwnerFilter, setSelectedOwnerFilter] = useState<string>('all');
+
+  // Supabase real-time sync state
+  const [isLoadingHoldings, setIsLoadingHoldings] = useState(false);
+  const [holdingsError, setHoldingsError] = useState<string | null>(null);
+  const [isSubmittingHolding, setIsSubmittingHolding] = useState(false);
+  const [addHoldingError, setAddHoldingError] = useState<string | null>(null);
+
+  // Initial component mount: fetch all existing holdings directly via supabase.from('holdings').select('*')
+  useEffect(() => {
+    let isMounted = true;
+
+    async function loadHoldingsFromSupabase() {
+      setIsLoadingHoldings(true);
+      setHoldingsError(null);
+      try {
+        const { data, error } = await supabase.from('holdings').select('*');
+        if (error) {
+          console.error('[Supabase] Error fetching holdings on mount:', error);
+          if (isMounted) {
+            setHoldingsError(error.message);
+          }
+          return;
+        }
+
+        if (data && isMounted) {
+          const mappedHoldings = data.map(mapRowToHolding);
+          // Directly populate the state with existing holdings from Supabase, avoiding mock data
+          onUpdateState((prev) => ({
+            ...prev,
+            holdings: mappedHoldings,
+          }));
+        }
+      } catch (err: any) {
+        console.error('[Supabase] Exception loading holdings on mount:', err);
+        if (isMounted) {
+          setHoldingsError(err?.message || 'Failed to load holdings from Supabase');
+        }
+      } finally {
+        if (isMounted) {
+          setIsLoadingHoldings(false);
+        }
+      }
+    }
+
+    loadHoldingsFromSupabase();
+
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
+  // Manual refresh from Supabase
+  const handleRefreshHoldings = async () => {
+    setIsLoadingHoldings(true);
+    setHoldingsError(null);
+    try {
+      const { data, error } = await supabase.from('holdings').select('*');
+      if (error) {
+        console.error('[Supabase] Error refreshing holdings:', error);
+        setHoldingsError(error.message);
+        return;
+      }
+      if (data) {
+        const mappedHoldings = data.map(mapRowToHolding);
+        onUpdateState((prev) => ({
+          ...prev,
+          holdings: mappedHoldings,
+        }));
+      }
+    } catch (err: any) {
+      console.error('[Supabase] Exception refreshing holdings:', err);
+      setHoldingsError(err?.message || 'Failed to refresh holdings');
+    } finally {
+      setIsLoadingHoldings(false);
+    }
+  };
 
   // DRIP Simulator settings state
   const [horizonYears, setHorizonYears] = useState(state.dripSettings.investmentHorizonYears);
@@ -198,8 +275,8 @@ export function DividendTrackerModule({ state, onUpdateState }: DividendTrackerM
     reinvestDividends: reinvest,
   });
 
-  // Handle Add Holding
-  const handleAddHolding = (e: React.FormEvent) => {
+  // Handle Add Holding - immediately executes await supabase.from('holdings').insert([...])
+  const handleAddHolding = async (e: React.FormEvent) => {
     e.preventDefault();
     const shares = parseFloat(newShares);
     const avgCost = parseFloat(newAvgCost);
@@ -238,47 +315,87 @@ export function DividendTrackerModule({ state, onUpdateState }: DividendTrackerM
       dripEnabled: newDripEnabled,
     };
 
-    onUpdateState((prev) => ({
-      ...prev,
-      holdings: [newHolding, ...prev.holdings],
-    }));
+    setIsSubmittingHolding(true);
+    setAddHoldingError(null);
 
-    // Immediately execute database insert/update query to persist holding directly in Supabase
-    insertOrUpdateHoldingInSupabase(newHolding);
+    try {
+      const dbRow = mapHoldingToRow(newHolding);
 
-    // Reset form
-    setNewSymbol('');
-    setNewName('');
-    setNewShares('');
-    setNewAvgCost('');
-    setNewCurrentPrice('');
-    setNewAnnualDiv('');
-    setNewExDate('');
-    setNewPayDate('');
-    setQuoteFetchSuccess(null);
-    setQuoteFetchError(null);
-    setFetchedYield(null);
-    setShowAddHoldingModal(false);
+      // Immediately execute insert to Supabase holdings table
+      const { data, error } = await supabase.from('holdings').insert([dbRow]).select();
+
+      if (error) {
+        console.error('[Supabase] Failed to insert holding into Supabase:', error);
+        setAddHoldingError(`Supabase Error (${error.code || 'INSERT'}): ${error.message}`);
+        setIsSubmittingHolding(false);
+        return;
+      }
+
+      // If insert succeeds, update state immediately with the inserted holding
+      const insertedHolding = data && data.length > 0 ? mapRowToHolding(data[0]) : newHolding;
+      onUpdateState((prev) => ({
+        ...prev,
+        holdings: [insertedHolding, ...prev.holdings.filter((h) => h.id !== insertedHolding.id)],
+      }));
+
+      // Reset form and close modal
+      setNewSymbol('');
+      setNewName('');
+      setNewShares('');
+      setNewAvgCost('');
+      setNewCurrentPrice('');
+      setNewAnnualDiv('');
+      setNewExDate('');
+      setNewPayDate('');
+      setQuoteFetchSuccess(null);
+      setQuoteFetchError(null);
+      setFetchedYield(null);
+      setShowAddHoldingModal(false);
+    } catch (err: any) {
+      console.error('[Supabase] Exception inserting holding:', err);
+      setAddHoldingError(err?.message || 'An unexpected error occurred while saving the holding.');
+    } finally {
+      setIsSubmittingHolding(false);
+    }
   };
 
-  const handleDeleteHolding = (id: string) => {
+  const handleDeleteHolding = async (id: string) => {
     onUpdateState((prev) => ({
       ...prev,
       holdings: prev.holdings.filter((h) => h.id !== id),
     }));
-    // Immediately execute database delete query in Supabase
-    deleteHoldingFromSupabase(id);
+
+    try {
+      const { error } = await supabase.from('holdings').delete().eq('id', id);
+      if (error) {
+        console.warn('[Supabase] Error deleting holding from Supabase:', error.message);
+      }
+    } catch (err) {
+      console.error('[Supabase] Exception deleting holding:', err);
+    }
   };
 
-  const handleToggleDRIP = (id: string) => {
+  const handleToggleDRIP = async (id: string) => {
     const target = state.holdings.find((h) => h.id === id);
-    if (target) {
-      insertOrUpdateHoldingInSupabase({ ...target, dripEnabled: !target.dripEnabled });
-    }
+    if (!target) return;
+    const nextDrip = !target.dripEnabled;
+
     onUpdateState((prev) => ({
       ...prev,
-      holdings: prev.holdings.map((h) => (h.id === id ? { ...h, dripEnabled: !h.dripEnabled } : h)),
+      holdings: prev.holdings.map((h) => (h.id === id ? { ...h, dripEnabled: nextDrip } : h)),
     }));
+
+    try {
+      const { error } = await supabase
+        .from('holdings')
+        .update({ drip_enabled: nextDrip, updated_at: new Date().toISOString() })
+        .eq('id', id);
+      if (error) {
+        console.warn('[Supabase] Error updating DRIP in Supabase:', error.message);
+      }
+    } catch (err) {
+      console.error('[Supabase] Exception updating DRIP:', err);
+    }
   };
 
   // Sort upcoming payouts by month
@@ -683,6 +800,17 @@ export function DividendTrackerModule({ state, onUpdateState }: DividendTrackerM
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
+            {/* Supabase Sync Button */}
+            <button
+              onClick={handleRefreshHoldings}
+              disabled={isLoadingHoldings}
+              title="Refresh holdings directly from Supabase database"
+              className="flex items-center space-x-1.5 text-xs 2xl:text-sm font-semibold bg-white/10 hover:bg-white/15 border border-white/15 text-slate-200 px-3 py-1.5 2xl:px-3.5 2xl:py-2 rounded-xl transition-all disabled:opacity-50"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 ${isLoadingHoldings ? 'animate-spin text-violet-400' : ''}`} />
+              <span>{isLoadingHoldings ? 'Syncing...' : 'Sync'}</span>
+            </button>
+
             {/* Account Filter */}
             <select
               value={selectedAccountFilter}
@@ -710,7 +838,10 @@ export function DividendTrackerModule({ state, onUpdateState }: DividendTrackerM
             </select>
 
             <button
-              onClick={() => setShowAddHoldingModal(true)}
+              onClick={() => {
+                setAddHoldingError(null);
+                setShowAddHoldingModal(true);
+              }}
               className="flex items-center space-x-1.5 text-xs 2xl:text-sm font-semibold bg-violet-600 hover:bg-violet-500 border border-violet-400/50 text-white px-3.5 py-1.5 2xl:px-4 2xl:py-2 rounded-xl transition-all shadow-lg shadow-violet-600/20"
             >
               <Plus className="w-4 h-4" />
@@ -718,6 +849,22 @@ export function DividendTrackerModule({ state, onUpdateState }: DividendTrackerM
             </button>
           </div>
         </div>
+
+        {/* Holdings Error Alert if Supabase query failed */}
+        {holdingsError && (
+          <div className="mb-4 p-3 rounded-xl bg-rose-500/20 border border-rose-500/40 text-rose-300 text-xs flex items-center justify-between">
+            <div className="flex items-center space-x-2">
+              <AlertCircle className="w-4 h-4 text-rose-400 shrink-0" />
+              <span><strong>Supabase Sync Error:</strong> {holdingsError}</span>
+            </div>
+            <button
+              onClick={handleRefreshHoldings}
+              className="underline hover:text-white font-medium ml-3"
+            >
+              Retry
+            </button>
+          </div>
+        )}
 
         <div className="overflow-x-auto rounded-xl border border-white/10">
           <table className="w-full text-left text-xs 2xl:text-sm">
@@ -1206,20 +1353,42 @@ export function DividendTrackerModule({ state, onUpdateState }: DividendTrackerM
                 </div>
               )}
 
+              {/* Add Holding Error Alert */}
+              {addHoldingError && (
+                <div className="p-3 rounded-xl bg-rose-500/20 border border-rose-500/40 text-rose-300 text-xs flex items-start space-x-2">
+                  <AlertCircle className="w-4 h-4 text-rose-400 mt-0.5 shrink-0" />
+                  <div className="flex-1">
+                    <div className="font-semibold">Persistence Failed</div>
+                    <div>{addHoldingError}</div>
+                  </div>
+                </div>
+              )}
+
               <div className="flex justify-end space-x-2 pt-3 border-t border-white/10">
                 <button
                   type="button"
+                  disabled={isSubmittingHolding}
                   onClick={() => setShowAddHoldingModal(false)}
-                  className="px-4 py-2 2xl:py-2.5 rounded-xl text-slate-400 hover:text-white border border-white/10 bg-white/5 hover:bg-white/10 transition-all font-medium"
+                  className="px-4 py-2 2xl:py-2.5 rounded-xl text-slate-400 hover:text-white border border-white/10 bg-white/5 hover:bg-white/10 transition-all font-medium disabled:opacity-50"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
-                  className="px-5 py-2 2xl:py-2.5 rounded-xl bg-violet-600 text-white hover:bg-violet-500 font-semibold border border-violet-400/50 shadow-lg shadow-violet-600/20 transition-all flex items-center gap-1.5"
+                  disabled={isSubmittingHolding}
+                  className="px-5 py-2 2xl:py-2.5 rounded-xl bg-violet-600 text-white hover:bg-violet-500 disabled:opacity-60 disabled:cursor-not-allowed font-semibold border border-violet-400/50 shadow-lg shadow-violet-600/20 transition-all flex items-center gap-1.5"
                 >
-                  <CheckCircle2 className="w-4 h-4" />
-                  <span>Save Position</span>
+                  {isSubmittingHolding ? (
+                    <>
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                      <span>Saving to Supabase...</span>
+                    </>
+                  ) : (
+                    <>
+                      <CheckCircle2 className="w-4 h-4" />
+                      <span>Save Position</span>
+                    </>
+                  )}
                 </button>
               </div>
             </form>

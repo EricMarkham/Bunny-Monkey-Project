@@ -23,7 +23,7 @@ export interface StateSnapshot {
 /**
  * Maps database holding row to TypeScript DividendHolding
  */
-function mapRowToHolding(row: any): DividendHolding {
+export function mapRowToHolding(row: any): DividendHolding {
   return {
     id: String(row.id),
     symbol: row.symbol || '',
@@ -49,7 +49,7 @@ function mapRowToHolding(row: any): DividendHolding {
 /**
  * Maps DividendHolding to Supabase DB row format
  */
-function mapHoldingToRow(h: DividendHolding): Record<string, any> {
+export function mapHoldingToRow(h: DividendHolding): Record<string, any> {
   return {
     id: h.id,
     symbol: h.symbol,
@@ -225,7 +225,7 @@ export async function fetchHouseholdStateFromSupabase(): Promise<{
     const resolvedState: HouseholdState = {
       ...baseState,
       holdings:
-        !holdingsRes.error && holdingsRes.data && holdingsRes.data.length > 0
+        !holdingsRes.error && holdingsRes.data
           ? holdingsRes.data.map(mapRowToHolding)
           : baseState.holdings,
       statementTransactions:
