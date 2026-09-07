@@ -31,6 +31,10 @@ import {
   normalizeDateToIso,
   sanitizeTransactions,
 } from '../utils/finance';
+import {
+  insertOrUpdateTransactionInSupabase,
+  deleteTransactionFromSupabase,
+} from '../services/supabaseService';
 
 interface StatementParserModuleProps {
   state: HouseholdState;
@@ -340,6 +344,11 @@ export function StatementParserModule({
       };
     });
 
+    // Immediately persist each committed transaction to Supabase database
+    parsedItems.forEach((tx) => {
+      insertOrUpdateTransactionInSupabase(tx);
+    });
+
     // Auto-select the statement period that was just committed to
     setSelectedPeriod(effectiveTargetUploadPeriod);
 
@@ -388,10 +397,15 @@ export function StatementParserModule({
       ...prev,
       statementTransactions: prev.statementTransactions.filter((i) => i.id !== id),
     }));
+    deleteTransactionFromSupabase(id);
   };
 
   // Update committed transaction category
   const handleUpdateCommittedCategory = (id: string, category: StatementCategory) => {
+    const target = state.statementTransactions.find((tx) => tx.id === id);
+    if (target) {
+      insertOrUpdateTransactionInSupabase({ ...target, assignedCategory: category });
+    }
     onUpdateState((prev) => ({
       ...prev,
       statementTransactions: prev.statementTransactions.map((tx) =>
@@ -402,6 +416,10 @@ export function StatementParserModule({
 
   // Update committed transaction statement period
   const handleUpdateCommittedPeriod = (id: string, newPeriod: string) => {
+    const target = state.statementTransactions.find((tx) => tx.id === id);
+    if (target) {
+      insertOrUpdateTransactionInSupabase({ ...target, statementPeriod: newPeriod });
+    }
     onUpdateState((prev) => ({
       ...prev,
       statementTransactions: prev.statementTransactions.map((tx) =>
@@ -419,10 +437,15 @@ export function StatementParserModule({
   // Save edited committed amount
   const handleSaveEditAmount = (id: string) => {
     const num = parseFloat(editAmountVal) || 0;
+    const absNum = Math.abs(num);
+    const target = state.statementTransactions.find((tx) => tx.id === id);
+    if (target) {
+      insertOrUpdateTransactionInSupabase({ ...target, amount: absNum });
+    }
     onUpdateState((prev) => ({
       ...prev,
       statementTransactions: prev.statementTransactions.map((tx) =>
-        tx.id === id ? { ...tx, amount: Math.abs(num) } : tx
+        tx.id === id ? { ...tx, amount: absNum } : tx
       ),
     }));
     setEditingTxId(null);

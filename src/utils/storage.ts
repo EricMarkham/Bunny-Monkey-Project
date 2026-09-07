@@ -1,72 +1,21 @@
 import { HouseholdState } from '../types';
 import { initialHouseholdState } from '../data/initialData';
 import { sanitizeTransactions } from './finance';
+import {
+  fetchHouseholdStateFromSupabase,
+  persistEntireStateToSupabase,
+  fetchSnapshotsFromSupabase,
+  saveSnapshotToSupabase,
+  deleteSnapshotFromSupabase,
+} from '../services/supabaseService';
+import type { StateSnapshot } from '../services/supabaseService';
+import { isSupabaseConfigured } from '../lib/supabase';
 
-export const LOCAL_STORAGE_KEY = 'bunny_monkey_finance_v1';
-export const SNAPSHOTS_KEY = 'bunny_monkey_finance_snapshots_v1';
+export type { StateSnapshot };
 
-const DB_NAME = 'BunnyMonkeyFinanceDB';
-const DB_VERSION = 1;
-const STORE_NAME = 'household_state_store';
-
-/**
- * Open or initialize the IndexedDB database
- */
-function openDB(): Promise<IDBDatabase> {
-  return new Promise((resolve, reject) => {
-    if (typeof window === 'undefined' || !window.indexedDB) {
-      return reject(new Error('IndexedDB not supported in this environment'));
-    }
-
-    const request = window.indexedDB.open(DB_NAME, DB_VERSION);
-
-    request.onupgradeneeded = (event) => {
-      const db = (event.target as IDBOpenDBRequest).result;
-      if (!db.objectStoreNames.contains(STORE_NAME)) {
-        db.createObjectStore(STORE_NAME, { keyPath: 'id' });
-      }
-    };
-
-    request.onsuccess = (event) => {
-      resolve((event.target as IDBOpenDBRequest).result);
-    };
-
-    request.onerror = () => {
-      reject(request.error);
-    };
-  });
-}
-
-/**
- * Request Persistent Storage from the browser (protects from low-disk eviction)
- */
-export async function requestPersistentStorage(): Promise<{
-  isPersisted: boolean;
-  quota?: number;
-  usage?: number;
-}> {
-  try {
-    let isPersisted = false;
-    if (navigator.storage && navigator.storage.persist) {
-      isPersisted = await navigator.storage.persist();
-    } else if (navigator.storage && navigator.storage.persisted) {
-      isPersisted = await navigator.storage.persisted();
-    }
-
-    let quota: number | undefined;
-    let usage: number | undefined;
-    if (navigator.storage && navigator.storage.estimate) {
-      const estimate = await navigator.storage.estimate();
-      quota = estimate.quota;
-      usage = estimate.usage;
-    }
-
-    return { isPersisted, quota, usage };
-  } catch (err) {
-    console.warn('Storage estimate/persist check failed', err);
-    return { isPersisted: false };
-  }
-}
+// Cache in memory for instantaneous reads and offline rendering
+let inMemoryStateCache: HouseholdState | null = null;
+let inMemorySnapshotsCache: StateSnapshot[] = [];
 
 /**
  * Merge saved data with initial data to ensure all required fields exist
@@ -111,70 +60,36 @@ export function sanitizeAndMigrateState(parsed: any): HouseholdState {
 }
 
 /**
- * Save HouseholdState synchronously to LocalStorage and asynchronously to IndexedDB
+ * Save HouseholdState directly to the Supabase backend
+ * Note: localStorage reliance is completely removed.
  */
 export async function saveHouseholdState(state: HouseholdState): Promise<void> {
-  // 1. Primary Sync: LocalStorage
+  inMemoryStateCache = state;
   try {
-    localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(state));
-    localStorage.setItem(`${LOCAL_STORAGE_KEY}_last_saved`, new Date().toISOString());
-  } catch (e) {
-    console.warn('LocalStorage save failed, relying on IndexedDB', e);
-  }
-
-  // 2. Secondary Sync: IndexedDB
-  try {
-    const db = await openDB();
-    const tx = db.transaction(STORE_NAME, 'readwrite');
-    const store = tx.objectStore(STORE_NAME);
-    store.put({
-      id: 'current_household_state',
-      timestamp: new Date().toISOString(),
-      state,
-    });
+    await persistEntireStateToSupabase(state);
   } catch (err) {
-    console.warn('IndexedDB save failed', err);
+    console.error('[Supabase Save Error]', err);
   }
 }
 
 /**
- * Load HouseholdState: checks LocalStorage first, falls back to IndexedDB if LocalStorage is empty
+ * Load HouseholdState dynamically from Supabase database tables
+ * Note: localStorage reliance is completely removed.
  */
 export async function loadHouseholdState(): Promise<HouseholdState> {
-  // 1. Try LocalStorage
-  try {
-    const saved = localStorage.getItem(LOCAL_STORAGE_KEY);
-    if (saved) {
-      const parsed = JSON.parse(saved);
-      return sanitizeAndMigrateState(parsed);
-    }
-  } catch (e) {
-    console.warn('Error reading from LocalStorage, checking IndexedDB', e);
+  if (inMemoryStateCache) {
+    return inMemoryStateCache;
   }
 
-  // 2. Fallback to IndexedDB (e.g. after browser cache clear or large data)
   try {
-    const db = await openDB();
-    const result = await new Promise<any>((resolve, reject) => {
-      const tx = db.transaction(STORE_NAME, 'readonly');
-      const store = tx.objectStore(STORE_NAME);
-      const req = store.get('current_household_state');
-      req.onsuccess = () => resolve(req.result);
-      req.onerror = () => reject(req.error);
-    });
-
-    if (result && result.state) {
-      // Re-hydrate LocalStorage for faster subsequent synchronous loads
-      try {
-        localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(result.state));
-      } catch (ignore) {}
-      return sanitizeAndMigrateState(result.state);
-    }
-  } catch (e) {
-    console.warn('IndexedDB load failed, falling back to initial state', e);
+    const { state } = await fetchHouseholdStateFromSupabase();
+    const migrated = sanitizeAndMigrateState(state);
+    inMemoryStateCache = migrated;
+    return migrated;
+  } catch (err) {
+    console.warn('[Supabase Load Error, using initial data]', err);
+    return initialHouseholdState;
   }
-
-  return initialHouseholdState;
 }
 
 /**
@@ -208,6 +123,9 @@ export function importStateFromFile(file: File): Promise<HouseholdState> {
         const parsed = JSON.parse(text);
         if (parsed && typeof parsed === 'object') {
           const state = sanitizeAndMigrateState(parsed);
+          inMemoryStateCache = state;
+          // Persist to Supabase
+          persistEntireStateToSupabase(state).catch(console.error);
           resolve(state);
         } else {
           reject(new Error('Invalid household backup file format.'));
@@ -221,56 +139,49 @@ export function importStateFromFile(file: File): Promise<HouseholdState> {
   });
 }
 
-export interface StateSnapshot {
-  id: string;
-  name: string;
-  timestamp: string;
-  state: HouseholdState;
-}
-
 /**
- * Save a named snapshot to persistent storage
+ * Save a named snapshot to Supabase cloud storage (no local storage)
  */
-export function saveSnapshot(name: string, state: HouseholdState): StateSnapshot[] {
+export async function saveSnapshot(name: string, state: HouseholdState): Promise<StateSnapshot[]> {
   try {
-    const existingStr = localStorage.getItem(SNAPSHOTS_KEY);
-    const snapshots: StateSnapshot[] = existingStr ? JSON.parse(existingStr) : [];
-    const newSnapshot: StateSnapshot = {
-      id: `snap-${Date.now()}`,
-      name: name.trim() || `Snapshot ${new Date().toLocaleDateString()}`,
-      timestamp: new Date().toISOString(),
-      state,
-    };
-    const updated = [newSnapshot, ...snapshots].slice(0, 10); // Keep last 10 snapshots
-    localStorage.setItem(SNAPSHOTS_KEY, JSON.stringify(updated));
+    const updated = await saveSnapshotToSupabase(name, state);
+    inMemorySnapshotsCache = updated;
     return updated;
   } catch (e) {
-    console.error('Failed to save snapshot', e);
-    return [];
+    console.error('Failed to save snapshot to Supabase', e);
+    return inMemorySnapshotsCache;
   }
 }
 
 /**
- * Get all saved snapshots
+ * Get all saved snapshots from Supabase cloud storage (no local storage)
  */
-export function getSnapshots(): StateSnapshot[] {
+export async function getSnapshots(): Promise<StateSnapshot[]> {
   try {
-    const existingStr = localStorage.getItem(SNAPSHOTS_KEY);
-    return existingStr ? JSON.parse(existingStr) : [];
-  } catch (e) {
-    return [];
-  }
-}
-
-/**
- * Delete a snapshot by ID
- */
-export function deleteSnapshot(id: string): StateSnapshot[] {
-  try {
-    const snapshots = getSnapshots().filter((s) => s.id !== id);
-    localStorage.setItem(SNAPSHOTS_KEY, JSON.stringify(snapshots));
+    if (inMemorySnapshotsCache.length > 0) {
+      return inMemorySnapshotsCache;
+    }
+    const snapshots = await fetchSnapshotsFromSupabase();
+    inMemorySnapshotsCache = snapshots;
     return snapshots;
   } catch (e) {
+    console.error('Failed to fetch snapshots from Supabase', e);
     return [];
   }
 }
+
+/**
+ * Delete a snapshot by ID from Supabase
+ */
+export async function deleteSnapshot(id: string): Promise<StateSnapshot[]> {
+  try {
+    await deleteSnapshotFromSupabase(id);
+    inMemorySnapshotsCache = inMemorySnapshotsCache.filter((s) => s.id !== id);
+    return inMemorySnapshotsCache;
+  } catch (e) {
+    console.error('Failed to delete snapshot from Supabase', e);
+    return inMemorySnapshotsCache;
+  }
+}
+
+export { isSupabaseConfigured };

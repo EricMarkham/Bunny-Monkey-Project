@@ -35,6 +35,10 @@ import {
   formatPercent,
 } from '../utils/finance';
 import { CategoryDonutChart } from './charts/CustomCharts';
+import {
+  insertOrUpdateExpenseInSupabase,
+  deleteExpenseFromSupabase,
+} from '../services/supabaseService';
 
 interface BudgetModuleProps {
   state: HouseholdState;
@@ -163,6 +167,9 @@ export function BudgetModule({
       expenses: [...prev.expenses, newExpense],
     }));
 
+    // Immediately execute database insert/update query to persist expense directly in Supabase
+    insertOrUpdateExpenseInSupabase(newExpense);
+
     // Reset
     setNewExpTitle('');
     setNewExpAmount('');
@@ -177,6 +184,8 @@ export function BudgetModule({
       ...prev,
       expenses: prev.expenses.filter((exp) => exp.id !== id),
     }));
+    // Immediately execute database delete query in Supabase
+    deleteExpenseFromSupabase(id);
   };
 
   const openEditExpense = (exp: HouseholdExpense) => {
@@ -219,6 +228,9 @@ export function BudgetModule({
       ...prev,
       expenses: prev.expenses.map((exp) => (exp.id === editingExpense.id ? updatedExpense : exp)),
     }));
+
+    // Immediately execute database update query in Supabase
+    insertOrUpdateExpenseInSupabase(updatedExpense);
 
     setEditingExpense(null);
   };

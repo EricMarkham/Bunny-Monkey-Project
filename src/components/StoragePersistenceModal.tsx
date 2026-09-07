@@ -10,17 +10,17 @@ import {
   Clock,
   Trash2,
   ShieldCheck,
-  AlertCircle,
+  Sparkles,
 } from 'lucide-react';
 import { HouseholdState } from '../types';
 import {
   exportStateToFile,
   importStateFromFile,
-  requestPersistentStorage,
   saveSnapshot,
   getSnapshots,
   deleteSnapshot,
   StateSnapshot,
+  isSupabaseConfigured,
 } from '../utils/storage';
 
 interface StoragePersistenceModalProps {
@@ -34,33 +34,32 @@ export function StoragePersistenceModal({
   onRestoreState,
   onClose,
 }: StoragePersistenceModalProps) {
-  const [isPersisted, setIsPersisted] = useState<boolean | null>(null);
-  const [storageUsage, setStorageUsage] = useState<string>('');
   const [snapshotName, setSnapshotName] = useState('');
   const [snapshots, setSnapshots] = useState<StateSnapshot[]>([]);
   const [statusMsg, setStatusMsg] = useState<string | null>(null);
+  const [isSaving, setIsSaving] = useState(false);
+  const isConnected = isSupabaseConfigured();
 
   useEffect(() => {
-    // Check browser persistent storage
-    requestPersistentStorage().then((res) => {
-      setIsPersisted(res.isPersisted);
-      if (res.usage !== undefined) {
-        const kb = (res.usage / 1024).toFixed(1);
-        setStorageUsage(`${kb} KB`);
-      }
+    // Load remote snapshots from Supabase
+    getSnapshots().then((loaded) => {
+      setSnapshots(loaded);
     });
-
-    setSnapshots(getSnapshots());
   }, []);
 
-  const handleSaveSnapshot = (e: React.FormEvent) => {
+  const handleSaveSnapshot = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!snapshotName.trim()) return;
-    const updated = saveSnapshot(snapshotName, state);
-    setSnapshots(updated);
-    setSnapshotName('');
-    setStatusMsg('Point-in-time snapshot saved successfully!');
-    setTimeout(() => setStatusMsg(null), 3000);
+    if (!snapshotName.trim() || isSaving) return;
+    setIsSaving(true);
+    try {
+      const updated = await saveSnapshot(snapshotName, state);
+      setSnapshots(updated);
+      setSnapshotName('');
+      setStatusMsg('Snapshot saved to Supabase cloud successfully!');
+      setTimeout(() => setStatusMsg(null), 3000);
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   const handleRestoreSnapshot = (snap: StateSnapshot) => {
@@ -77,8 +76,8 @@ export function StoragePersistenceModal({
     }
   };
 
-  const handleDeleteSnapshot = (id: string) => {
-    const updated = deleteSnapshot(id);
+  const handleDeleteSnapshot = async (id: string) => {
+    const updated = await deleteSnapshot(id);
     setSnapshots(updated);
   };
 
@@ -88,9 +87,9 @@ export function StoragePersistenceModal({
     try {
       const imported = await importStateFromFile(file);
       onRestoreState(imported);
-      setStatusMsg('File backup restored successfully!');
+      setStatusMsg('File backup restored and synced to Supabase successfully!');
       setTimeout(() => setStatusMsg(null), 3000);
-    } catch (err) {
+    } catch {
       alert('Failed to import backup file. Please ensure it is a valid household JSON export.');
     }
   };
@@ -106,16 +105,16 @@ export function StoragePersistenceModal({
             </span>
             <div>
               <h2 className="text-lg font-bold text-white flex items-center gap-2">
-                Data Persistence &amp; Backup Vault
+                Supabase Cloud Database &amp; Vault
               </h2>
               <p className="text-xs text-slate-400">
-                Persistent local storage across browser refreshes, reboots, and offline backups
+                Persistent backend synchronization across devices with zero browser local storage reliance
               </p>
             </div>
           </div>
           <button
             onClick={onClose}
-            className="text-slate-400 hover:text-white text-lg font-bold p-1"
+            className="text-slate-400 hover:text-white text-lg font-bold p-1 cursor-pointer"
           >
             ✕
           </button>
@@ -126,23 +125,30 @@ export function StoragePersistenceModal({
           <div className="flex items-center justify-between text-xs">
             <div className="flex items-center space-x-2">
               <ShieldCheck className="w-4 h-4 text-emerald-400 shrink-0" />
-              <span className="font-semibold text-white">Browser Persistence Engine:</span>
-              <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
-                ACTIVE &amp; AUTO-SAVING
+              <span className="font-semibold text-white">Backend Persistence Status:</span>
+              <span
+                className={`px-2 py-0.5 rounded-full text-[10px] font-bold border ${
+                  isConnected
+                    ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30'
+                    : 'bg-amber-500/20 text-amber-300 border-amber-500/30'
+                }`}
+              >
+                {isConnected ? 'SUPABASE POSTGRESQL CONNECTED' : 'SUPABASE READY (DEFAULT DEMO ACTIVE)'}
               </span>
             </div>
-            {storageUsage && (
-              <span className="font-mono text-slate-400 text-[11px]">
-                Vault size: {storageUsage}
-              </span>
-            )}
+            <span className="font-mono text-slate-400 text-[11px] flex items-center gap-1">
+              <Sparkles className="w-3 h-3 text-violet-400" />
+              No LocalStorage
+            </span>
           </div>
           <p className="text-xs text-slate-300 leading-relaxed">
             All modifications to your <strong>Joint Budget</strong>, <strong>Actuals</strong>,{' '}
-            <strong>Statement Ledger</strong>, <strong>Trip Expenses</strong>, and{' '}
-            <strong>Piggy/Bunny/Monkey Dividend Portfolios</strong> are synchronously synced to
-            LocalStorage and persistent IndexedDB. Your inputs survive page refreshes, tab closures,
-            and computer reboots.
+            <strong>Statement Transactions</strong>, <strong>Trips</strong>, and{' '}
+            <strong>Dividend Portfolios</strong> connect directly to your Supabase tables (
+            <code className="text-emerald-300 font-mono text-[11px]">public.holdings</code>,{' '}
+            <code className="text-emerald-300 font-mono text-[11px]">public.expenses</code>,{' '}
+            <code className="text-emerald-300 font-mono text-[11px]">public.household_state</code>).
+            No financial or sensitive portfolio data is stored or cached in browser local storage.
           </p>
         </div>
 
@@ -157,18 +163,18 @@ export function StoragePersistenceModal({
         <div className="space-y-3">
           <h3 className="text-sm font-bold text-white flex items-center gap-2">
             <HardDrive className="w-4 h-4 text-teal-400" />
-            Hard Drive Backups (JSON File)
+            Hard Drive Offline Backups (JSON File Export)
           </h3>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <button
               onClick={() => exportStateToFile(state)}
-              className="p-4 rounded-2xl bg-white/5 hover:bg-white/10 border border-white/10 text-left transition-all group flex items-start space-x-3"
+              className="p-4 rounded-2xl bg-white/5 hover:bg-white/10 border border-white/10 text-left transition-all group flex items-start space-x-3 cursor-pointer"
             >
               <Download className="w-5 h-5 text-teal-400 mt-0.5 group-hover:translate-y-0.5 transition-transform" />
               <div>
                 <div className="font-bold text-sm text-white">Download Offline Backup</div>
                 <div className="text-[11px] text-slate-400 mt-0.5">
-                  Save full database as a portable .json file onto your computer drive
+                  Export complete household state as an encrypted portable .json file onto your computer
                 </div>
               </div>
             </button>
@@ -178,7 +184,7 @@ export function StoragePersistenceModal({
               <div>
                 <div className="font-bold text-sm text-white">Restore from File</div>
                 <div className="text-[11px] text-slate-400 mt-0.5">
-                  Load a previously exported .json file into the app
+                  Upload a previously exported .json file and sync directly into Supabase
                 </div>
                 <input
                   type="file"
@@ -191,12 +197,12 @@ export function StoragePersistenceModal({
           </div>
         </div>
 
-        {/* Point-in-Time Snapshots */}
+        {/* Cloud Snapshots */}
         <div className="space-y-3 border-t border-white/10 pt-4">
           <div className="flex justify-between items-center">
             <h3 className="text-sm font-bold text-white flex items-center gap-2">
               <Clock className="w-4 h-4 text-violet-400" />
-              Named In-Browser Snapshots
+              Supabase Cloud Snapshots
             </h3>
             <span className="text-[10px] text-slate-400 font-mono">
               {snapshots.length} saved
@@ -213,11 +219,11 @@ export function StoragePersistenceModal({
             />
             <button
               type="submit"
-              disabled={!snapshotName.trim()}
-              className="px-4 py-2 bg-violet-600 hover:bg-violet-500 disabled:opacity-40 text-white font-bold rounded-xl transition-all flex items-center gap-1.5"
+              disabled={!snapshotName.trim() || isSaving}
+              className="px-4 py-2 bg-violet-600 hover:bg-violet-500 disabled:opacity-40 text-white font-bold rounded-xl transition-all flex items-center gap-1.5 cursor-pointer"
             >
               <Save className="w-3.5 h-3.5" />
-              <span>Save Snapshot</span>
+              <span>{isSaving ? 'Saving...' : 'Save Cloud Snapshot'}</span>
             </button>
           </form>
 
@@ -238,14 +244,14 @@ export function StoragePersistenceModal({
                   <div className="flex items-center space-x-1.5">
                     <button
                       onClick={() => handleRestoreSnapshot(snap)}
-                      className="px-2.5 py-1 bg-teal-500/20 hover:bg-teal-500/30 text-teal-300 font-bold rounded-lg border border-teal-500/30 transition-all flex items-center gap-1 text-[11px]"
+                      className="px-2.5 py-1 bg-teal-500/20 hover:bg-teal-500/30 text-teal-300 font-bold rounded-lg border border-teal-500/30 transition-all flex items-center gap-1 text-[11px] cursor-pointer"
                     >
                       <RotateCcw className="w-3 h-3" />
                       <span>Restore</span>
                     </button>
                     <button
                       onClick={() => handleDeleteSnapshot(snap.id)}
-                      className="p-1.5 text-slate-500 hover:text-rose-400 transition-colors"
+                      className="p-1.5 text-slate-500 hover:text-rose-400 transition-colors cursor-pointer"
                       title="Delete snapshot"
                     >
                       <Trash2 className="w-3.5 h-3.5" />
@@ -256,7 +262,7 @@ export function StoragePersistenceModal({
             </div>
           ) : (
             <p className="text-xs text-slate-500 italic">
-              No point-in-time snapshots created yet. Name and save one above anytime before making major changes.
+              No cloud snapshots created yet. Name and save one above anytime before making major adjustments.
             </p>
           )}
         </div>
@@ -265,7 +271,7 @@ export function StoragePersistenceModal({
         <div className="flex justify-end pt-2 border-t border-white/10">
           <button
             onClick={onClose}
-            className="px-5 py-2 bg-white/10 hover:bg-white/15 text-white font-semibold text-xs rounded-xl transition-all"
+            className="px-5 py-2 bg-white/10 hover:bg-white/15 text-white font-semibold text-xs rounded-xl transition-all cursor-pointer"
           >
             Close Vault
           </button>

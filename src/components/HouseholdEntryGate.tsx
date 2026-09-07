@@ -26,11 +26,6 @@ export function HouseholdEntryGate({ onAuthenticated }: HouseholdEntryGateProps)
 
     if (cleanPasscode === HOUSEHOLD_PASSCODE) {
       setErrorMsg('');
-      try {
-        localStorage.setItem(HOUSEHOLD_AUTH_KEY, 'true');
-      } catch (err) {
-        console.error('Error writing auth to localStorage', err);
-      }
       onAuthenticated();
     } else {
       setErrorMsg('Incorrect passcode. Please try again.');

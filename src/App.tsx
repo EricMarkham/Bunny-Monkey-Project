@@ -8,57 +8,59 @@ import { TripSettlementModule } from './components/TripSettlementModule';
 import { StatementParserModule } from './components/StatementParserModule';
 import { DividendTrackerModule } from './components/DividendTrackerModule';
 import { StoragePersistenceModal } from './components/StoragePersistenceModal';
-import { HouseholdEntryGate, HOUSEHOLD_AUTH_KEY } from './components/HouseholdEntryGate';
+import { HouseholdEntryGate } from './components/HouseholdEntryGate';
 import {
   saveHouseholdState,
   loadHouseholdState,
   sanitizeAndMigrateState,
-  LOCAL_STORAGE_KEY,
+  isSupabaseConfigured,
 } from './utils/storage';
+import { fetchHouseholdStateFromSupabase } from './services/supabaseService';
 
 export default function App() {
-  // Household Entry Gate Access State
-  const [isAuthenticated, setIsAuthenticated] = useState<boolean>(() => {
-    try {
-      return localStorage.getItem(HOUSEHOLD_AUTH_KEY) === 'true';
-    } catch {
-      return false;
-    }
-  });
+  // Household Entry Gate Access State (Secure memory-only session, zero localStorage)
+  const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false);
 
-  const [state, setState] = useState<HouseholdState>(() => {
-    try {
-      const saved = localStorage.getItem(LOCAL_STORAGE_KEY);
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        return sanitizeAndMigrateState(parsed);
-      }
-    } catch (e) {
-      console.error('Error loading saved household state from localStorage', e);
-    }
-    return initialHouseholdState;
-  });
+  // Household Financial State: initialized from memory, dynamically hydrated from Supabase on mount
+  const [state, setState] = useState<HouseholdState>(initialHouseholdState);
+  const [isSupabaseConnected, setIsSupabaseConnected] = useState<boolean>(false);
+  const [isLoadingFromSupabase, setIsLoadingFromSupabase] = useState<boolean>(true);
 
   const [activeTab, setActiveTab] = useState<'budget' | 'actuals' | 'trips' | 'statement' | 'dividends'>('budget');
   const [showResetConfirm, setShowResetConfirm] = useState(false);
   const [showStorageModal, setShowStorageModal] = useState(false);
 
-  // Hydrate from IndexedDB on initial mount if local storage was empty
+  // Dynamically fetch fresh state from Supabase PostgreSQL tables on load
   useEffect(() => {
-    const hasLocal = localStorage.getItem(LOCAL_STORAGE_KEY);
-    if (!hasLocal) {
-      loadHouseholdState().then((persistedState) => {
-        if (persistedState) {
-          setState(persistedState);
+    let isMounted = true;
+    setIsLoadingFromSupabase(true);
+
+    fetchHouseholdStateFromSupabase()
+      .then(({ state: remoteState, isLiveSupabase }) => {
+        if (isMounted) {
+          setState(remoteState);
+          setIsSupabaseConnected(isLiveSupabase || isSupabaseConfigured());
+          setIsLoadingFromSupabase(false);
+        }
+      })
+      .catch((err) => {
+        console.warn('Initial Supabase hydration error', err);
+        if (isMounted) {
+          setIsLoadingFromSupabase(false);
         }
       });
-    }
+
+    return () => {
+      isMounted = false;
+    };
   }, []);
 
-  // Multi-tier auto-save to LocalStorage + IndexedDB on every state modification
+  // Sync state directly to Supabase backend on state modifications
   useEffect(() => {
-    saveHouseholdState(state);
-  }, [state]);
+    if (!isLoadingFromSupabase) {
+      saveHouseholdState(state);
+    }
+  }, [state, isLoadingFromSupabase]);
 
   // Export JSON backup
   const handleExportJSON = () => {
@@ -76,12 +78,15 @@ export default function App() {
 
   // Import JSON backup
   const handleImportJSON = (importedData: HouseholdState) => {
-    setState(sanitizeAndMigrateState(importedData));
+    const sanitized = sanitizeAndMigrateState(importedData);
+    setState(sanitized);
+    saveHouseholdState(sanitized);
   };
 
   // Reset to default demo data
   const handleResetDemo = () => {
     setState(initialHouseholdState);
+    saveHouseholdState(initialHouseholdState);
     setShowResetConfirm(false);
   };
 
@@ -99,13 +104,8 @@ export default function App() {
     }));
   };
 
-  // Lock / Sign out of Household session
+  // Lock / Sign out of Household session (clears memory state, zero localStorage)
   const handleLock = () => {
-    try {
-      localStorage.removeItem(HOUSEHOLD_AUTH_KEY);
-    } catch (e) {
-      console.error('Error clearing auth from localStorage', e);
-    }
     setIsAuthenticated(false);
   };
 
@@ -184,19 +184,19 @@ export default function App() {
             <span className="text-white/20">•</span>
             <button
               onClick={() => setShowStorageModal(true)}
-              className="flex items-center gap-1.5 text-[10px] 2xl:text-xs uppercase tracking-wider text-emerald-400 hover:text-emerald-300 font-semibold transition-colors"
-              title="Click to view data persistence vault & backups"
+              className="flex items-center gap-1.5 text-[10px] 2xl:text-xs uppercase tracking-wider text-emerald-400 hover:text-emerald-300 font-semibold transition-colors cursor-pointer"
+              title="Click to view Supabase database persistence vault & backups"
             >
-              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.8)] animate-pulse" />
-              IndexedDB &amp; Local Storage Active (Reboot-Safe)
+              <span className={`w-1.5 h-1.5 rounded-full ${isSupabaseConnected ? 'bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.8)] animate-pulse' : 'bg-amber-400'}`} />
+              {isSupabaseConnected ? 'Supabase PostgreSQL Cloud Active (Zero LocalStorage)' : 'Supabase Backend Sync Ready'}
             </button>
           </div>
           <div className="flex items-center gap-2 text-[11px] 2xl:text-xs text-slate-400">
             <button
               onClick={() => setShowStorageModal(true)}
-              className="px-2 py-0.5 rounded-md bg-emerald-500/10 border border-emerald-500/30 text-emerald-300 hover:bg-emerald-500/20 transition-colors"
+              className="px-2 py-0.5 rounded-md bg-emerald-500/10 border border-emerald-500/30 text-emerald-300 hover:bg-emerald-500/20 transition-colors cursor-pointer"
             >
-              Storage Vault &amp; Snapshots
+              Database Vault &amp; Snapshots
             </button>
             <span className="px-2 py-0.5 rounded-md bg-white/5 border border-white/10 text-slate-300">
               Dual-Earner OS

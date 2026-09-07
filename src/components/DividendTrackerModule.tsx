@@ -35,6 +35,10 @@ import {
   USD_TO_CAD_RATE,
 } from '../utils/finance';
 import { DRIPGrowthAreaChart, MonthlyDividendBarChart } from './charts/CustomCharts';
+import {
+  insertOrUpdateHoldingInSupabase,
+  deleteHoldingFromSupabase,
+} from '../services/supabaseService';
 
 interface DividendTrackerModuleProps {
   state: HouseholdState;
@@ -239,6 +243,9 @@ export function DividendTrackerModule({ state, onUpdateState }: DividendTrackerM
       holdings: [newHolding, ...prev.holdings],
     }));
 
+    // Immediately execute database insert/update query to persist holding directly in Supabase
+    insertOrUpdateHoldingInSupabase(newHolding);
+
     // Reset form
     setNewSymbol('');
     setNewName('');
@@ -259,9 +266,15 @@ export function DividendTrackerModule({ state, onUpdateState }: DividendTrackerM
       ...prev,
       holdings: prev.holdings.filter((h) => h.id !== id),
     }));
+    // Immediately execute database delete query in Supabase
+    deleteHoldingFromSupabase(id);
   };
 
   const handleToggleDRIP = (id: string) => {
+    const target = state.holdings.find((h) => h.id === id);
+    if (target) {
+      insertOrUpdateHoldingInSupabase({ ...target, dripEnabled: !target.dripEnabled });
+    }
     onUpdateState((prev) => ({
       ...prev,
       holdings: prev.holdings.map((h) => (h.id === id ? { ...h, dripEnabled: !h.dripEnabled } : h)),
