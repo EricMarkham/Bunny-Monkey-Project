@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import confetti from 'canvas-confetti';
 import {
   Plus,
@@ -17,6 +17,7 @@ import {
   Calendar,
   Sparkles,
   BarChart3,
+  RefreshCw,
 } from 'lucide-react';
 import {
   ExpenseCategory,
@@ -38,7 +39,14 @@ import { CategoryDonutChart } from './charts/CustomCharts';
 import {
   insertOrUpdateExpenseInSupabase,
   deleteExpenseFromSupabase,
+  insertOrUpdateSinkingFundInSupabase,
+  deleteSinkingFundFromSupabase,
+  updateSinkingFundBalanceInSupabase,
+  updatePartnerIncomesInSupabase,
+  mapRowToExpense,
+  mapRowToSinkingFund,
 } from '../services/supabaseService';
+import { supabase, isSupabaseConfigured } from '../lib/supabase';
 
 interface BudgetModuleProps {
   state: HouseholdState;
@@ -118,6 +126,43 @@ export function BudgetModule({
   const [bunnyGrossInput, setBunnyGrossInput] = useState(state.partners.bunny.grossMonthlyIncome.toString());
   const [monkeyNetInput, setMonkeyNetInput] = useState(state.partners.monkey.netMonthlyIncome.toString());
   const [monkeyGrossInput, setMonkeyGrossInput] = useState(state.partners.monkey.grossMonthlyIncome.toString());
+
+  // Cloud sync state for BudgetModule
+  const [isSyncing, setIsSyncing] = useState(false);
+  const [syncStatus, setSyncStatus] = useState<string | null>(null);
+
+  const syncFromSupabase = async () => {
+    if (!isSupabaseConfigured()) return;
+    setIsSyncing(true);
+    try {
+      const [expRes, sfRes] = await Promise.all([
+        supabase.from('expenses').select('*'),
+        supabase.from('sinking_funds').select('*'),
+      ]);
+      if (!expRes.error && expRes.data && expRes.data.length > 0) {
+        onUpdateState((prev) => ({
+          ...prev,
+          expenses: expRes.data.map(mapRowToExpense),
+        }));
+      }
+      if (!sfRes.error && sfRes.data && sfRes.data.length > 0) {
+        onUpdateState((prev) => ({
+          ...prev,
+          sinkingFunds: sfRes.data.map(mapRowToSinkingFund),
+        }));
+      }
+      setSyncStatus('✓ Synced with Supabase');
+      setTimeout(() => setSyncStatus(null), 3000);
+    } catch (err) {
+      console.warn('Sync error:', err);
+    } finally {
+      setIsSyncing(false);
+    }
+  };
+
+  useEffect(() => {
+    syncFromSupabase();
+  }, []);
 
   const summary = calculateBudgetSummary(state.partners, state.expenses, state.sinkingFunds);
 
@@ -288,6 +333,9 @@ export function BudgetModule({
       };
     });
 
+    // Execute immediate Supabase update
+    insertOrUpdateSinkingFundInSupabase(updatedFund);
+
     setEditingFund(null);
   };
 
@@ -297,6 +345,8 @@ export function BudgetModule({
       ...prev,
       sinkingFunds: prev.sinkingFunds.filter((f) => f.id !== fundId),
     }));
+    // Execute immediate Supabase delete
+    deleteSinkingFundFromSupabase(fundId);
     setEditingFund(null);
   };
 
@@ -322,6 +372,9 @@ export function BudgetModule({
       ...prev,
       sinkingFunds: [...prev.sinkingFunds, newFund],
     }));
+
+    // Execute immediate Supabase insert
+    insertOrUpdateSinkingFundInSupabase(newFund);
 
     setNewSfName('');
     setNewSfTarget('');
@@ -370,6 +423,9 @@ export function BudgetModule({
       };
     });
 
+    // Execute immediate Supabase balance update
+    updateSinkingFundBalanceInSupabase(selectedFundForAdjust.id, newBalance);
+
     setSelectedFundForAdjust(null);
     setFundAdjustAmount('');
   };
@@ -382,21 +438,26 @@ export function BudgetModule({
     const mNet = parseFloat(monkeyNetInput) || 0;
     const mGross = parseFloat(monkeyGrossInput) || 0;
 
+    const updatedPartners = {
+      bunny: {
+        ...state.partners.bunny,
+        netMonthlyIncome: bNet,
+        grossMonthlyIncome: bGross,
+      },
+      monkey: {
+        ...state.partners.monkey,
+        netMonthlyIncome: mNet,
+        grossMonthlyIncome: mGross,
+      },
+    };
+
     onUpdateState((prev) => ({
       ...prev,
-      partners: {
-        bunny: {
-          ...prev.partners.bunny,
-          netMonthlyIncome: bNet,
-          grossMonthlyIncome: bGross,
-        },
-        monkey: {
-          ...prev.partners.monkey,
-          netMonthlyIncome: mNet,
-          grossMonthlyIncome: mGross,
-        },
-      },
+      partners: updatedPartners,
     }));
+
+    // Execute immediate Supabase partner incomes update
+    updatePartnerIncomesInSupabase(updatedPartners);
 
     setShowIncomeModal(false);
   };
@@ -433,18 +494,35 @@ export function BudgetModule({
                 </div>
               </div>
 
-              <button
-                onClick={() => {
-                  setBunnyNetInput(state.partners.bunny.netMonthlyIncome.toString());
-                  setBunnyGrossInput(state.partners.bunny.grossMonthlyIncome.toString());
-                  setMonkeyNetInput(state.partners.monkey.netMonthlyIncome.toString());
-                  setMonkeyGrossInput(state.partners.monkey.grossMonthlyIncome.toString());
-                  setShowIncomeModal(true);
-                }}
-                className="text-xs 2xl:text-sm font-semibold text-rose-300 hover:text-white bg-rose-500/20 hover:bg-rose-500/30 px-3 py-1.5 2xl:px-4 2xl:py-2 rounded-xl border border-rose-500/30 transition-all shadow-xs"
-              >
-                Edit Incomes
-              </button>
+              <div className="flex items-center gap-2">
+                {syncStatus && (
+                  <span className="text-xs text-emerald-400 font-medium">
+                    {syncStatus}
+                  </span>
+                )}
+                <button
+                  onClick={syncFromSupabase}
+                  disabled={isSyncing}
+                  title="Sync Budget & Sinking Funds from Supabase"
+                  className="text-xs font-medium text-slate-300 hover:text-white bg-white/10 hover:bg-white/15 px-2.5 py-1.5 rounded-xl border border-white/10 transition-all flex items-center gap-1.5"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 ${isSyncing ? 'animate-spin text-rose-400' : ''}`} />
+                  <span className="hidden sm:inline">Sync</span>
+                </button>
+
+                <button
+                  onClick={() => {
+                    setBunnyNetInput(state.partners.bunny.netMonthlyIncome.toString());
+                    setBunnyGrossInput(state.partners.bunny.grossMonthlyIncome.toString());
+                    setMonkeyNetInput(state.partners.monkey.netMonthlyIncome.toString());
+                    setMonkeyGrossInput(state.partners.monkey.grossMonthlyIncome.toString());
+                    setShowIncomeModal(true);
+                  }}
+                  className="text-xs 2xl:text-sm font-semibold text-rose-300 hover:text-white bg-rose-500/20 hover:bg-rose-500/30 px-3 py-1.5 2xl:px-4 2xl:py-2 rounded-xl border border-rose-500/30 transition-all shadow-xs"
+                >
+                  Edit Incomes
+                </button>
+              </div>
             </div>
 
             {/* Split Progress Bar */}

@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import {
   FileText,
   Upload,
@@ -16,6 +16,7 @@ import {
   X,
   ArrowRight,
   ShieldCheck,
+  RefreshCw,
 } from 'lucide-react';
 import {
   HouseholdState,
@@ -33,8 +34,11 @@ import {
 } from '../utils/finance';
 import {
   insertOrUpdateTransactionInSupabase,
+  bulkInsertTransactionsInSupabase,
   deleteTransactionFromSupabase,
+  mapRowToTransaction,
 } from '../services/supabaseService';
+import { supabase, isSupabaseConfigured } from '../lib/supabase';
 
 interface StatementParserModuleProps {
   state: HouseholdState;
@@ -189,6 +193,34 @@ export function StatementParserModule({
     if (hasAug) return '2026-08';
     return availablePeriods.length > 0 ? availablePeriods[0].id : '2026-08';
   });
+
+  // Cloud sync state for StatementParserModule
+  const [isSyncing, setIsSyncing] = useState(false);
+  const [syncStatus, setSyncStatus] = useState<string | null>(null);
+
+  const syncTransactionsFromSupabase = async () => {
+    if (!isSupabaseConfigured()) return;
+    setIsSyncing(true);
+    try {
+      const { data, error } = await supabase.from('statement_transactions').select('*');
+      if (!error && data && data.length > 0) {
+        onUpdateState((prev) => ({
+          ...prev,
+          statementTransactions: sanitizeTransactions(data.map(mapRowToTransaction)),
+        }));
+        setSyncStatus('✓ Ledger synced');
+        setTimeout(() => setSyncStatus(null), 3000);
+      }
+    } catch (err) {
+      console.warn('Sync error:', err);
+    } finally {
+      setIsSyncing(false);
+    }
+  };
+
+  useEffect(() => {
+    syncTransactionsFromSupabase();
+  }, []);
 
   // Calculate Period and YTD actuals
   const actualsSummary = useMemo(() => {
@@ -345,9 +377,7 @@ export function StatementParserModule({
     });
 
     // Immediately persist each committed transaction to Supabase database
-    parsedItems.forEach((tx) => {
-      insertOrUpdateTransactionInSupabase(tx);
-    });
+    bulkInsertTransactionsInSupabase(parsedItems);
 
     // Auto-select the statement period that was just committed to
     setSelectedPeriod(effectiveTargetUploadPeriod);
@@ -454,28 +484,33 @@ export function StatementParserModule({
 
   // One-click repair: assign all transactions with July/August dates to August 2026 statement
   const handleAssignAllToAugust2026 = () => {
-    onUpdateState((prev) => {
-      const updated = prev.statementTransactions.map((tx) => {
-        const cleanDate = normalizeDateToIso(tx.date, 2026);
-        if (cleanDate.includes('2026-07') || cleanDate.includes('2026-08') || !tx.statementPeriod) {
-          return {
-            ...tx,
-            date: cleanDate,
-            statementPeriod: '2026-08',
-          };
-        }
+    const updated = state.statementTransactions.map((tx) => {
+      const cleanDate = normalizeDateToIso(tx.date, 2026);
+      if (cleanDate.includes('2026-07') || cleanDate.includes('2026-08') || !tx.statementPeriod) {
         return {
           ...tx,
           date: cleanDate,
+          statementPeriod: '2026-08',
         };
-      });
+      }
       return {
-        ...prev,
-        statementTransactions: sanitizeTransactions(updated),
+        ...tx,
+        date: cleanDate,
       };
     });
+
+    const sanitizedUpdated = sanitizeTransactions(updated);
+
+    onUpdateState((prev) => ({
+      ...prev,
+      statementTransactions: sanitizedUpdated,
+    }));
+
+    // Persist healed transactions directly to Supabase
+    bulkInsertTransactionsInSupabase(sanitizedUpdated);
+
     setSelectedPeriod('2026-08');
-    setSuccessCommitMessage('✓ All July and August transactions have been assigned to the August 2026 Statement!');
+    setSuccessCommitMessage('✓ All July and August transactions have been assigned to the August 2026 Statement and saved to Supabase!');
     setTimeout(() => setSuccessCommitMessage(null), 5000);
   };
 
@@ -1084,6 +1119,20 @@ export function StatementParserModule({
               <span className="text-xs 2xl:text-sm font-semibold px-2.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
                 {filteredTransactions.length} Recorded
               </span>
+              {syncStatus && (
+                <span className="text-xs text-emerald-400 font-medium">
+                  {syncStatus}
+                </span>
+              )}
+              <button
+                onClick={syncTransactionsFromSupabase}
+                disabled={isSyncing}
+                title="Sync Transactions from Supabase"
+                className="text-xs font-medium text-slate-300 hover:text-white bg-white/10 hover:bg-white/15 px-2.5 py-1 rounded-xl border border-white/10 transition-all flex items-center gap-1.5"
+              >
+                <RefreshCw className={`w-3.5 h-3.5 ${isSyncing ? 'animate-spin text-indigo-400' : ''}`} />
+                <span className="hidden sm:inline">Sync Ledger</span>
+              </button>
             </div>
             <p className="text-xs 2xl:text-sm text-slate-400">
               Showing active transactions filtered for{' '}

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import confetti from 'canvas-confetti';
 import {
   Plane,
@@ -18,6 +18,7 @@ import {
   Sparkles,
   Compass,
   AlertTriangle,
+  RefreshCw,
 } from 'lucide-react';
 import {
   HouseholdState,
@@ -29,6 +30,16 @@ import {
 } from '../types';
 import { calculateTripTracking, formatCurrency, formatCurrencyExact } from '../utils/finance';
 import { CategoryDonutChart } from './charts/CustomCharts';
+import {
+  insertOrUpdateTripInSupabase,
+  deleteTripFromSupabase,
+  insertOrUpdateTripExpenseInSupabase,
+  deleteTripExpenseFromSupabase,
+  updateSinkingFundBalanceInSupabase,
+  mapRowToTrip,
+  mapRowToTripExpense,
+} from '../services/supabaseService';
+import { supabase, isSupabaseConfigured } from '../lib/supabase';
 
 interface TripSettlementModuleProps {
   state: HouseholdState;
@@ -86,6 +97,43 @@ export function TripSettlementModule({ state, onUpdateState }: TripSettlementMod
     return vac ? vac.id : state.sinkingFunds[0]?.id || '';
   });
 
+  // Cloud sync state for TripSettlementModule
+  const [isSyncing, setIsSyncing] = useState(false);
+  const [syncStatus, setSyncStatus] = useState<string | null>(null);
+
+  const syncTripsFromSupabase = async () => {
+    if (!isSupabaseConfigured()) return;
+    setIsSyncing(true);
+    try {
+      const [tripsRes, expensesRes] = await Promise.all([
+        supabase.from('trips').select('*'),
+        supabase.from('trip_expenses').select('*'),
+      ]);
+      if (!tripsRes.error && tripsRes.data && tripsRes.data.length > 0) {
+        onUpdateState((prev) => ({
+          ...prev,
+          trips: tripsRes.data.map(mapRowToTrip),
+        }));
+      }
+      if (!expensesRes.error && expensesRes.data && expensesRes.data.length > 0) {
+        onUpdateState((prev) => ({
+          ...prev,
+          tripExpenses: expensesRes.data.map(mapRowToTripExpense),
+        }));
+      }
+      setSyncStatus('✓ Trips synced');
+      setTimeout(() => setSyncStatus(null), 3000);
+    } catch (err) {
+      console.warn('Sync error:', err);
+    } finally {
+      setIsSyncing(false);
+    }
+  };
+
+  useEffect(() => {
+    syncTripsFromSupabase();
+  }, []);
+
   // Delete Trip Handler
   const handleDeleteTrip = (tripId: string) => {
     onUpdateState((prev) => {
@@ -103,6 +151,8 @@ export function TripSettlementModule({ state, onUpdateState }: TripSettlementMod
         activeTripId: nextActiveId,
       };
     });
+    // Immediately delete trip from Supabase
+    deleteTripFromSupabase(tripId);
     setTripToDelete(null);
   };
 
@@ -170,6 +220,9 @@ export function TripSettlementModule({ state, onUpdateState }: TripSettlementMod
       trips: [...prev.trips, newTrip],
       activeTripId: newTrip.id,
     }));
+
+    // Immediately execute database insert query in Supabase
+    insertOrUpdateTripInSupabase(newTrip);
 
     setTripName('');
     setTripDest('');
@@ -407,6 +460,15 @@ export function TripSettlementModule({ state, onUpdateState }: TripSettlementMod
       };
     });
 
+    // Immediately persist trip expense to Supabase
+    insertOrUpdateTripExpenseInSupabase(newExpense);
+    if (expPaidBy === 'sinking_fund' && vacationFund) {
+      updateSinkingFundBalanceInSupabase(
+        vacationFund.id,
+        Math.max(0, vacationFund.currentBalance - cost)
+      );
+    }
+
     setExpDesc('');
     setExpCost('');
     setExpNotes('');
@@ -416,20 +478,19 @@ export function TripSettlementModule({ state, onUpdateState }: TripSettlementMod
 
   // Toggle Sinking Fund coverage on an existing expense
   const handleToggleSinkingFundCoverage = (expenseId: string) => {
-    onUpdateState((prev) => {
-      const exp = prev.tripExpenses.find((e) => e.id === expenseId);
-      if (!exp) return prev;
-      const willBeFunded = !exp.fundedBySinkingFund;
+    const exp = state.tripExpenses.find((e) => e.id === expenseId);
+    if (!exp) return;
+    const willBeFunded = !exp.fundedBySinkingFund;
 
-      // Update the expense
+    const updatedExpense: TripExpense = {
+      ...exp,
+      fundedBySinkingFund: willBeFunded,
+      sinkingFundId: willBeFunded ? (vacationFund ? vacationFund.id : undefined) : undefined,
+    };
+
+    onUpdateState((prev) => {
       const updatedExpenses = prev.tripExpenses.map((e) =>
-        e.id === expenseId
-          ? {
-              ...e,
-              fundedBySinkingFund: willBeFunded,
-              sinkingFundId: willBeFunded ? (vacationFund ? vacationFund.id : undefined) : undefined,
-            }
-          : e
+        e.id === expenseId ? updatedExpense : e
       );
 
       // Optionally adjust sinking fund balance
@@ -452,6 +513,15 @@ export function TripSettlementModule({ state, onUpdateState }: TripSettlementMod
         sinkingFunds: updatedFunds,
       };
     });
+
+    // Immediately persist update to Supabase
+    insertOrUpdateTripExpenseInSupabase(updatedExpense);
+    if (vacationFund) {
+      const newBal = willBeFunded
+        ? Math.max(0, vacationFund.currentBalance - exp.totalCost)
+        : vacationFund.currentBalance + exp.totalCost;
+      updateSinkingFundBalanceInSupabase(vacationFund.id, newBal);
+    }
   };
 
   const handleDeleteExpense = (id: string) => {
@@ -459,6 +529,8 @@ export function TripSettlementModule({ state, onUpdateState }: TripSettlementMod
       ...prev,
       tripExpenses: prev.tripExpenses.filter((e) => e.id !== id),
     }));
+    // Immediately delete expense from Supabase
+    deleteTripExpenseFromSupabase(id);
   };
 
   // Process Reimbursement from Sinking Fund for selected expenses
@@ -500,6 +572,19 @@ export function TripSettlementModule({ state, onUpdateState }: TripSettlementMod
         sinkingFunds: updatedFunds,
       };
     });
+
+    // Immediately persist reimbursed expenses and updated fund balance to Supabase
+    selectedExpenses.forEach((e) => {
+      insertOrUpdateTripExpenseInSupabase({
+        ...e,
+        fundedBySinkingFund: true,
+        sinkingFundId: vacationFund.id,
+      });
+    });
+    updateSinkingFundBalanceInSupabase(
+      vacationFund.id,
+      Math.max(0, vacationFund.currentBalance - totalToReimburse)
+    );
 
     confetti({
       particleCount: 100,
@@ -574,6 +659,24 @@ export function TripSettlementModule({ state, onUpdateState }: TripSettlementMod
             <Layers className="w-3.5 h-3.5 2xl:w-4 2xl:h-4" />
             <span>Manage Trips</span>
           </button>
+
+          {/* Sync from Supabase Button */}
+          <button
+            type="button"
+            onClick={syncTripsFromSupabase}
+            disabled={isSyncing}
+            className="flex items-center space-x-1.5 px-3 2xl:px-4 py-2 2xl:py-2.5 text-xs 2xl:text-sm font-semibold bg-white/5 hover:bg-white/10 text-slate-300 hover:text-white rounded-xl border border-white/10 transition-all shadow-sm"
+            title="Sync trips and expenses from Supabase"
+          >
+            <RefreshCw className={`w-3.5 h-3.5 2xl:w-4 2xl:h-4 ${isSyncing ? 'animate-spin text-teal-400' : ''}`} />
+            <span className="hidden sm:inline">Sync</span>
+          </button>
+
+          {syncStatus && (
+            <span className="text-xs text-teal-300 font-medium">
+              {syncStatus}
+            </span>
+          )}
 
           <button
             type="button"
