@@ -15,7 +15,10 @@ import {
   sanitizeAndMigrateState,
   isSupabaseConfigured,
 } from './utils/storage';
-import { fetchHouseholdStateFromSupabase } from './services/supabaseService';
+import {
+  fetchHouseholdStateFromSupabase,
+  updatePartnerIncomesInSupabase,
+} from './services/supabaseService';
 
 export default function App() {
   // Household Entry Gate Access State (Secure memory-only session, zero localStorage)
@@ -92,16 +95,21 @@ export default function App() {
 
   // Update Partner Info
   const handleUpdatePartner = (partnerKey: 'bunny' | 'monkey', updated: Partial<Partner>) => {
-    setState((prev) => ({
-      ...prev,
-      partners: {
+    setState((prev) => {
+      const updatedPartners = {
         ...prev.partners,
         [partnerKey]: {
           ...prev.partners[partnerKey],
           ...updated,
         },
-      },
-    }));
+      };
+      // Immediately execute Supabase update
+      updatePartnerIncomesInSupabase(updatedPartners);
+      return {
+        ...prev,
+        partners: updatedPartners,
+      };
+    });
   };
 
   // Lock / Sign out of Household session (clears memory state, zero localStorage)

@@ -299,6 +299,27 @@ export async function fetchHouseholdStateFromSupabase(): Promise<{
       baseState = { ...initialHouseholdState, ...unifiedData.state };
     }
 
+    // Check if settings table has partner income configuration
+    try {
+      const { data: settingsData } = await supabase
+        .from('settings')
+        .select('value')
+        .eq('id', 'partners')
+        .maybeSingle();
+
+      if (settingsData?.value) {
+        baseState = {
+          ...baseState,
+          partners: {
+            bunny: { ...baseState.partners.bunny, ...settingsData.value.bunny },
+            monkey: { ...baseState.partners.monkey, ...settingsData.value.monkey },
+          },
+        };
+      }
+    } catch {
+      // settings table may be optional
+    }
+
     // 2. Fetch granular tables in parallel for real-time synchronization
     const [
       holdingsRes,
@@ -318,6 +339,19 @@ export async function fetchHouseholdStateFromSupabase(): Promise<{
       supabase.from('trip_settlements').select('*'),
     ]);
 
+    // Check if brand new empty database with zero data across all tables
+    const isFreshDatabase =
+      !unifiedData?.state &&
+      (!expensesRes.data || expensesRes.data.length === 0) &&
+      (!tripsRes.data || tripsRes.data.length === 0) &&
+      (!holdingsRes.data || holdingsRes.data.length === 0) &&
+      (!transactionsRes.data || transactionsRes.data.length === 0);
+
+    if (isFreshDatabase) {
+      persistEntireStateToSupabase(initialHouseholdState).catch(console.error);
+      return { state: initialHouseholdState, isLiveSupabase: true };
+    }
+
     const resolvedState: HouseholdState = {
       ...baseState,
       holdings:
@@ -325,28 +359,28 @@ export async function fetchHouseholdStateFromSupabase(): Promise<{
           ? holdingsRes.data.map(mapRowToHolding)
           : baseState.holdings,
       statementTransactions:
-        !transactionsRes.error && transactionsRes.data && transactionsRes.data.length > 0
+        !transactionsRes.error && transactionsRes.data
           ? sanitizeTransactions(transactionsRes.data.map(mapRowToTransaction))
           : baseState.statementTransactions,
       expenses:
-        !expensesRes.error && expensesRes.data && expensesRes.data.length > 0
+        !expensesRes.error && expensesRes.data
           ? expensesRes.data.map(mapRowToExpense)
           : baseState.expenses,
       sinkingFunds:
-        !sinkingFundsRes.error && sinkingFundsRes.data && sinkingFundsRes.data.length > 0
+        !sinkingFundsRes.error && sinkingFundsRes.data
           ? sinkingFundsRes.data.map(mapRowToSinkingFund)
           : baseState.sinkingFunds,
       trips:
-        !tripsRes.error && tripsRes.data && tripsRes.data.length > 0
-          ? (tripsRes.data as Trip[])
+        !tripsRes.error && tripsRes.data
+          ? tripsRes.data.map(mapRowToTrip)
           : baseState.trips,
       tripExpenses:
-        !tripExpensesRes.error && tripExpensesRes.data && tripExpensesRes.data.length > 0
-          ? (tripExpensesRes.data as TripExpense[])
+        !tripExpensesRes.error && tripExpensesRes.data
+          ? tripExpensesRes.data.map(mapRowToTripExpense)
           : baseState.tripExpenses,
       tripSettlements:
-        !tripSettlementsRes.error && tripSettlementsRes.data && tripSettlementsRes.data.length > 0
-          ? (tripSettlementsRes.data as TripSettlement[])
+        !tripSettlementsRes.error && tripSettlementsRes.data
+          ? tripSettlementsRes.data.map(mapRowToTripSettlement)
           : baseState.tripSettlements,
     };
 
@@ -682,7 +716,21 @@ export async function updatePartnerIncomesInSupabase(partners: {
 }): Promise<void> {
   if (!isSupabaseConfigured()) return;
   try {
-    // Fetch current state object and update partners
+    // 1. Direct update query into settings table
+    try {
+      await supabase.from('settings').upsert(
+        {
+          id: 'partners',
+          value: partners,
+          updated_at: new Date().toISOString(),
+        },
+        { onConflict: 'id' }
+      );
+    } catch (settingsErr) {
+      console.warn('[Supabase] Could not update settings table:', settingsErr);
+    }
+
+    // 2. Direct update query into household_state table
     const { data } = await supabase
       .from('household_state')
       .select('state')

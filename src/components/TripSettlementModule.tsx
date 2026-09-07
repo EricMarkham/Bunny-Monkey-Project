@@ -169,6 +169,9 @@ export function TripSettlementModule({ state, onUpdateState }: TripSettlementMod
         activeTripId: remainingTrips[0]?.id || '',
       };
     });
+    // Immediately delete sample trips from Supabase
+    deleteTripFromSupabase('trip-1');
+    deleteTripFromSupabase('trip-2');
     setShowManageTripsModal(false);
   };
 
@@ -198,6 +201,11 @@ export function TripSettlementModule({ state, onUpdateState }: TripSettlementMod
       trips: [...prev.trips, ...sampleTrips.filter((st) => !prev.trips.some((t) => t.id === st.id))],
       activeTripId: prev.activeTripId || 'trip-1',
     }));
+
+    // Persist restored sample trips to Supabase
+    sampleTrips.forEach((st) => {
+      insertOrUpdateTripInSupabase(st);
+    });
   };
 
   // Create Trip Handler

@@ -125,6 +125,13 @@ CREATE TABLE IF NOT EXISTS public.household_snapshots (
     state JSONB NOT NULL
 );
 
+-- 8. Application Settings Table (for Partner Incomes & Household Configurations)
+CREATE TABLE IF NOT EXISTS public.settings (
+    id TEXT PRIMARY KEY,
+    value JSONB NOT NULL,
+    updated_at TIMESTAMPTZ DEFAULT timezone('utc'::text, now()) NOT NULL
+);
+
 -- Enable Row Level Security (RLS)
 ALTER TABLE public.household_state ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.holdings ENABLE ROW LEVEL SECURITY;
@@ -135,6 +142,7 @@ ALTER TABLE public.trips ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.trip_expenses ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.trip_settlements ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.household_snapshots ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.settings ENABLE ROW LEVEL SECURITY;
 
 -- Allow read/write access via anon key for the household application
 DO $$
@@ -165,5 +173,8 @@ BEGIN
     END IF;
     IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE policyname = 'Public Access Snapshots') THEN
         CREATE POLICY "Public Access Snapshots" ON public.household_snapshots FOR ALL USING (true) WITH CHECK (true);
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE policyname = 'Public Access Settings') THEN
+        CREATE POLICY "Public Access Settings" ON public.settings FOR ALL USING (true) WITH CHECK (true);
     END IF;
 END $$;
