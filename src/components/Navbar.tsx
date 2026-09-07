@@ -1,0 +1,273 @@
+import React, { useRef } from 'react';
+import {
+  Download,
+  Upload,
+  RotateCcw,
+  Sparkles,
+  Wallet,
+  Plane,
+  Receipt,
+  TrendingUp,
+  CheckCircle2,
+  BarChart3,
+  Database,
+} from 'lucide-react';
+import { HouseholdState, Partner } from '../types';
+import { formatCurrency } from '../utils/finance';
+
+interface NavbarProps {
+  state: HouseholdState;
+  activeTab: 'budget' | 'actuals' | 'trips' | 'statement' | 'dividends';
+  setActiveTab: (tab: 'budget' | 'actuals' | 'trips' | 'statement' | 'dividends') => void;
+  onExportJSON: () => void;
+  onImportJSON: (importedData: HouseholdState) => void;
+  onResetDemo: () => void;
+  onUpdatePartner: (partnerKey: 'bunny' | 'monkey', updated: Partial<Partner>) => void;
+  onOpenStorageModal?: () => void;
+}
+
+export function Navbar({
+  state,
+  activeTab,
+  setActiveTab,
+  onExportJSON,
+  onImportJSON,
+  onResetDemo,
+  onOpenStorageModal,
+}: NavbarProps) {
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const totalCombinedNet =
+    state.partners.bunny.netMonthlyIncome + state.partners.monkey.netMonthlyIncome;
+  const bunnyPct =
+    totalCombinedNet > 0
+      ? ((state.partners.bunny.netMonthlyIncome / totalCombinedNet) * 100).toFixed(1)
+      : '50.0';
+  const monkeyPct =
+    totalCombinedNet > 0
+      ? ((state.partners.monkey.netMonthlyIncome / totalCombinedNet) * 100).toFixed(1)
+      : '50.0';
+
+  const totalSinkingBalance = state.sinkingFunds.reduce(
+    (acc, fund) => acc + fund.currentBalance,
+    0
+  );
+
+  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      try {
+        const parsed = JSON.parse(event.target?.result as string);
+        if (parsed && parsed.partners && parsed.expenses) {
+          onImportJSON(parsed as HouseholdState);
+        } else {
+          alert('Invalid JSON file format for Household Finance backup.');
+        }
+      } catch (err) {
+        alert('Failed to parse JSON file.');
+      }
+    };
+    reader.readAsText(file);
+    if (fileInputRef.current) fileInputRef.current.value = '';
+  };
+
+  return (
+    <header className="relative z-40 border-b border-white/15 bg-white/10 backdrop-blur-md sticky top-0 shadow-xl shadow-black/20">
+      {/* Top Banner with Partners & Master KPIs */}
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-3.5 flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+        {/* Brand & Partner Avatars */}
+        <div className="flex items-center space-x-3">
+          <div className="flex items-center -space-x-2">
+            <div className="w-10 h-10 rounded-full bg-gradient-to-tr from-rose-400 to-indigo-500 border-2 border-white/20 flex items-center justify-center text-lg shadow-lg shadow-rose-500/20">
+              🐰
+            </div>
+            <div className="w-10 h-10 rounded-full bg-gradient-to-tr from-indigo-500 to-teal-400 border-2 border-white/20 flex items-center justify-center text-lg shadow-lg shadow-teal-500/20">
+              🐵
+            </div>
+          </div>
+          <div>
+            <div className="flex items-center space-x-2">
+              <h1 className="text-base font-bold text-white leading-tight tracking-tight">
+                Bunny &amp; Monkey Co-Op
+              </h1>
+              <span className="text-[10px] font-bold uppercase tracking-widest bg-indigo-500/20 text-indigo-300 px-2 py-0.5 rounded-full border border-indigo-500/40">
+                Dual-Earner OS
+              </span>
+            </div>
+            <p className="text-[11px] uppercase tracking-wider text-slate-400">
+              Joint Budgeting • Budget vs. Actuals • Statement Ledger • Dividend DRIP
+            </p>
+          </div>
+        </div>
+
+        {/* Global Summary Chips */}
+        <div className="flex flex-wrap items-center gap-2 text-xs">
+          {/* Bunny Share */}
+          <div className="flex items-center space-x-2 px-3 py-1.5 rounded-xl bg-white/5 backdrop-blur-md border border-white/10">
+            <span className="text-base">🐰</span>
+            <div>
+              <div className="text-[10px] uppercase tracking-wider text-rose-300 font-semibold">
+                Bunny ({bunnyPct}%)
+              </div>
+              <div className="text-xs text-slate-200 font-mono font-bold">
+                {formatCurrency(state.partners.bunny.netMonthlyIncome)}/mo
+              </div>
+            </div>
+          </div>
+
+          {/* Monkey Share */}
+          <div className="flex items-center space-x-2 px-3 py-1.5 rounded-xl bg-white/5 backdrop-blur-md border border-white/10">
+            <span className="text-base">🐵</span>
+            <div>
+              <div className="text-[10px] uppercase tracking-wider text-teal-300 font-semibold">
+                Monkey ({monkeyPct}%)
+              </div>
+              <div className="text-xs text-slate-200 font-mono font-bold">
+                {formatCurrency(state.partners.monkey.netMonthlyIncome)}/mo
+              </div>
+            </div>
+          </div>
+
+          {/* Combined Net Worth / Income */}
+          <div className="hidden sm:flex flex-col px-3 py-1.5 rounded-xl bg-white/5 backdrop-blur-md border border-white/10">
+            <span className="text-[10px] text-slate-400 font-semibold uppercase tracking-widest">
+              Joint Net Total
+            </span>
+            <span className="text-xs font-bold font-mono text-emerald-400">
+              {formatCurrency(totalCombinedNet)}/mo
+            </span>
+          </div>
+
+          {/* Sinking Cash Reserve */}
+          <div className="hidden lg:flex flex-col px-3 py-1.5 rounded-xl bg-indigo-900/40 backdrop-blur-md border border-indigo-500/30">
+            <span className="text-[10px] text-indigo-300 font-semibold uppercase tracking-widest">
+              Sinking Vault
+            </span>
+            <span className="text-xs font-bold font-mono text-indigo-200">
+              {formatCurrency(totalSinkingBalance)}
+            </span>
+          </div>
+
+          {/* Actions: Storage Vault, Export, Import, Reset */}
+          <div className="flex items-center space-x-1.5 border-l border-white/10 pl-2">
+            {onOpenStorageModal && (
+              <button
+                onClick={onOpenStorageModal}
+                title="Data Persistence & Backup Vault (Saved to Browser)"
+                className="flex items-center space-x-1.5 px-2.5 py-1.5 text-xs text-emerald-300 bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/30 rounded-xl transition-all shadow-sm"
+              >
+                <Database className="w-3.5 h-3.5 text-emerald-400" />
+                <span className="hidden sm:inline font-semibold">Storage Vault</span>
+                <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+              </button>
+            )}
+
+            <button
+              onClick={onExportJSON}
+              title="Export household data backup (JSON)"
+              className="p-2 text-slate-300 hover:text-white bg-white/5 hover:bg-white/15 border border-white/10 rounded-xl transition-all"
+            >
+              <Download className="w-3.5 h-3.5" />
+            </button>
+
+            <button
+              onClick={() => fileInputRef.current?.click()}
+              title="Import household JSON data"
+              className="p-2 text-slate-300 hover:text-white bg-white/5 hover:bg-white/15 border border-white/10 rounded-xl transition-all"
+            >
+              <Upload className="w-3.5 h-3.5" />
+            </button>
+            <input
+              type="file"
+              ref={fileInputRef}
+              accept=".json"
+              onChange={handleFileUpload}
+              className="hidden"
+            />
+
+            <button
+              onClick={onResetDemo}
+              title="Reset to default demo data"
+              className="p-2 text-slate-400 hover:text-rose-400 bg-white/5 hover:bg-rose-500/20 border border-white/10 rounded-xl transition-all"
+            >
+              <RotateCcw className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {/* Main Navigation Tabs */}
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex space-x-1 sm:space-x-2 overflow-x-auto no-scrollbar border-t border-white/10 pt-1">
+        <button
+          onClick={() => setActiveTab('budget')}
+          className={`flex items-center space-x-2 py-2.5 px-3.5 text-xs sm:text-sm font-semibold rounded-t-xl transition-all whitespace-nowrap border-b-2 ${
+            activeTab === 'budget'
+              ? 'border-rose-400 text-rose-300 bg-white/10 shadow-inner'
+              : 'border-transparent text-slate-400 hover:text-slate-200 hover:bg-white/5'
+          }`}
+        >
+          <Wallet className="w-4 h-4" />
+          <span>Joint Budget &amp; Sinking Funds</span>
+        </button>
+
+        <button
+          onClick={() => setActiveTab('actuals')}
+          className={`flex items-center space-x-2 py-2.5 px-3.5 text-xs sm:text-sm font-semibold rounded-t-xl transition-all whitespace-nowrap border-b-2 ${
+            activeTab === 'actuals'
+              ? 'border-amber-400 text-amber-300 bg-white/10 shadow-inner'
+              : 'border-transparent text-slate-400 hover:text-slate-200 hover:bg-white/5'
+          }`}
+        >
+          <BarChart3 className="w-4 h-4" />
+          <span>Budget vs. Actuals Tracker</span>
+        </button>
+
+        <button
+          onClick={() => setActiveTab('statement')}
+          className={`flex items-center space-x-2 py-2.5 px-3.5 text-xs sm:text-sm font-semibold rounded-t-xl transition-all whitespace-nowrap border-b-2 ${
+            activeTab === 'statement'
+              ? 'border-indigo-400 text-indigo-300 bg-white/10 shadow-inner'
+              : 'border-transparent text-slate-400 hover:text-slate-200 hover:bg-white/5'
+          }`}
+        >
+          <Receipt className="w-4 h-4" />
+          <span>Statement Parser &amp; Ledger</span>
+        </button>
+
+        <button
+          onClick={() => setActiveTab('trips')}
+          className={`flex items-center space-x-2 py-2.5 px-3.5 text-xs sm:text-sm font-semibold rounded-t-xl transition-all whitespace-nowrap border-b-2 ${
+            activeTab === 'trips'
+              ? 'border-teal-400 text-teal-300 bg-white/10 shadow-inner'
+              : 'border-transparent text-slate-400 hover:text-slate-200 hover:bg-white/5'
+          }`}
+        >
+          <Plane className="w-4 h-4" />
+          <span>Trip &amp; Vacation Tracker</span>
+          {state.tripExpenses.length > 0 && (
+            <span className="text-[10px] bg-teal-500/20 text-teal-300 border border-teal-500/40 font-mono px-1.5 py-0.2 rounded-full">
+              {state.tripExpenses.length}
+            </span>
+          )}
+        </button>
+
+        <button
+          onClick={() => setActiveTab('dividends')}
+          className={`flex items-center space-x-2 py-2.5 px-3.5 text-xs sm:text-sm font-semibold rounded-t-xl transition-all whitespace-nowrap border-b-2 ${
+            activeTab === 'dividends'
+              ? 'border-violet-400 text-violet-300 bg-white/10 shadow-inner'
+              : 'border-transparent text-slate-400 hover:text-slate-200 hover:bg-white/5'
+          }`}
+        >
+          <TrendingUp className="w-4 h-4" />
+          <span>Equity Dividends &amp; DRIP Compound</span>
+          <span className="text-[10px] bg-violet-500/20 text-violet-300 border border-violet-500/40 font-mono px-1.5 py-0.2 rounded-full">
+            {state.holdings.length}
+          </span>
+        </button>
+      </div>
+    </header>
+  );
+}
