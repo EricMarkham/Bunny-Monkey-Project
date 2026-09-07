@@ -402,20 +402,20 @@ export function BudgetModule({
   return (
     <div className="space-y-8 pb-16">
       {/* Top Section: Income Splitter & Core Financial KPIs */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+      <div className="grid grid-cols-1 xl:grid-cols-2 gap-6 2xl:gap-8">
         {/* Income Split Engine Card */}
-        <div className="lg:col-span-5 bg-white/5 backdrop-blur-lg rounded-2xl p-6 border border-white/10 shadow-xl shadow-black/10 flex flex-col justify-between">
+        <div className="w-full bg-white/5 backdrop-blur-lg rounded-2xl p-6 2xl:p-8 border border-white/10 shadow-xl shadow-black/10 flex flex-col justify-between">
           <div>
             <div className="flex items-center justify-between mb-4">
-              <div className="flex items-center space-x-2.5">
-                <span className="p-2.5 rounded-xl bg-rose-500/20 text-rose-300 border border-rose-500/30">
-                  <Sliders className="w-5 h-5" />
+              <div className="flex items-center space-x-2.5 2xl:space-x-3">
+                <span className="p-2.5 2xl:p-3 rounded-xl bg-rose-500/20 text-rose-300 border border-rose-500/30">
+                  <Sliders className="w-5 h-5 2xl:w-6 2xl:h-6" />
                 </span>
                 <div>
-                  <h2 className="text-base font-bold text-white">
+                  <h2 className="text-base 2xl:text-xl font-bold text-white">
                     Income &amp; Split Ratio
                   </h2>
-                  <p className="text-xs text-slate-400">
+                  <p className="text-xs 2xl:text-sm text-slate-400">
                     Proportional dual-earner contribution ratio
                   </p>
                 </div>
@@ -429,7 +429,7 @@ export function BudgetModule({
                   setMonkeyGrossInput(state.partners.monkey.grossMonthlyIncome.toString());
                   setShowIncomeModal(true);
                 }}
-                className="text-xs font-semibold text-rose-300 hover:text-white bg-rose-500/20 hover:bg-rose-500/30 px-3 py-1.5 rounded-xl border border-rose-500/30 transition-all shadow-xs"
+                className="text-xs 2xl:text-sm font-semibold text-rose-300 hover:text-white bg-rose-500/20 hover:bg-rose-500/30 px-3 py-1.5 2xl:px-4 2xl:py-2 rounded-xl border border-rose-500/30 transition-all shadow-xs"
               >
                 Edit Incomes
               </button>
@@ -437,7 +437,7 @@ export function BudgetModule({
 
             {/* Split Progress Bar */}
             <div className="mb-4">
-              <div className="flex justify-between text-xs font-semibold mb-2">
+              <div className="flex justify-between text-xs 2xl:text-sm font-semibold mb-2">
                 <span className="text-rose-300 flex items-center gap-1">
                   🐰 Bunny: {formatPercent(summary.bunnyPercent, 1)}
                 </span>
@@ -445,7 +445,7 @@ export function BudgetModule({
                   🐵 Monkey: {formatPercent(summary.monkeyPercent, 1)}
                 </span>
               </div>
-              <div className="h-3 w-full rounded-full bg-slate-900/60 border border-white/10 overflow-hidden flex shadow-inner">
+              <div className="h-3 2xl:h-4 w-full rounded-full bg-slate-900/60 border border-white/10 overflow-hidden flex shadow-inner">
                 <div
                   style={{ width: `${summary.bunnyPercent}%` }}
                   className="bg-gradient-to-r from-rose-500 to-rose-400 h-full transition-all duration-500"
@@ -455,7 +455,7 @@ export function BudgetModule({
                   className="bg-gradient-to-r from-teal-500 to-emerald-400 h-full transition-all duration-500"
                 />
               </div>
-              <p className="text-[11px] text-slate-400 mt-2 leading-relaxed">
+              <p className="text-[11px] 2xl:text-xs text-slate-400 mt-2 leading-relaxed">
                 Shared bills and sinking funds default to an equitable{' '}
                 <strong className="text-slate-200">
                   {formatPercent(summary.bunnyPercent, 1)} / {formatPercent(summary.monkeyPercent, 1)}
@@ -465,18 +465,18 @@ export function BudgetModule({
             </div>
 
             {/* Detailed Partner Contribution Cards */}
-            <div className="grid grid-cols-2 gap-3 pt-2">
-              <div className="p-3.5 rounded-xl bg-rose-950/30 border border-rose-500/30 backdrop-blur-sm">
-                <div className="flex items-center justify-between text-xs mb-1">
+            <div className="grid grid-cols-2 gap-3 2xl:gap-4 pt-2">
+              <div className="p-3.5 2xl:p-5 rounded-xl bg-rose-950/30 border border-rose-500/30 backdrop-blur-sm">
+                <div className="flex items-center justify-between text-xs 2xl:text-sm mb-1">
                   <span className="font-bold text-rose-200">🐰 Bunny</span>
-                  <span className="text-[10px] bg-rose-500/20 text-rose-300 border border-rose-500/30 px-1.5 py-0.5 rounded-md font-mono">
+                  <span className="text-[10px] 2xl:text-xs bg-rose-500/20 text-rose-300 border border-rose-500/30 px-1.5 py-0.5 rounded-md font-mono">
                     Net Take-Home
                   </span>
                 </div>
-                <div className="text-lg font-extrabold font-mono text-white">
+                <div className="text-lg 2xl:text-2xl font-extrabold font-mono text-white">
                   {formatCurrency(state.partners.bunny.netMonthlyIncome)}
                 </div>
-                <div className="text-[11px] text-slate-400 mt-1 border-t border-rose-500/20 pt-1.5 space-y-0.5">
+                <div className="text-[11px] 2xl:text-xs text-slate-400 mt-1 border-t border-rose-500/20 pt-1.5 space-y-0.5">
                   <div className="flex justify-between">
                     <span>Obligation:</span>
                     <span className="font-semibold text-slate-200">
@@ -490,17 +490,17 @@ export function BudgetModule({
                 </div>
               </div>
 
-              <div className="p-3.5 rounded-xl bg-teal-950/30 border border-teal-500/30 backdrop-blur-sm">
-                <div className="flex items-center justify-between text-xs mb-1">
+              <div className="p-3.5 2xl:p-5 rounded-xl bg-teal-950/30 border border-teal-500/30 backdrop-blur-sm">
+                <div className="flex items-center justify-between text-xs 2xl:text-sm mb-1">
                   <span className="font-bold text-teal-200">🐵 Monkey</span>
-                  <span className="text-[10px] bg-teal-500/20 text-teal-300 border border-teal-500/30 px-1.5 py-0.5 rounded-md font-mono">
+                  <span className="text-[10px] 2xl:text-xs bg-teal-500/20 text-teal-300 border border-teal-500/30 px-1.5 py-0.5 rounded-md font-mono">
                     Net Take-Home
                   </span>
                 </div>
-                <div className="text-lg font-extrabold font-mono text-white">
+                <div className="text-lg 2xl:text-2xl font-extrabold font-mono text-white">
                   {formatCurrency(state.partners.monkey.netMonthlyIncome)}
                 </div>
-                <div className="text-[11px] text-slate-400 mt-1 border-t border-teal-500/20 pt-1.5 space-y-0.5">
+                <div className="text-[11px] 2xl:text-xs text-slate-400 mt-1 border-t border-teal-500/20 pt-1.5 space-y-0.5">
                   <div className="flex justify-between">
                     <span>Obligation:</span>
                     <span className="font-semibold text-slate-200">
@@ -516,28 +516,28 @@ export function BudgetModule({
             </div>
           </div>
 
-          <div className="mt-4 pt-3 border-t border-white/10 flex items-center justify-between text-xs text-slate-400">
+          <div className="mt-4 pt-3 border-t border-white/10 flex items-center justify-between text-xs 2xl:text-sm text-slate-400">
             <span>Household Savings Rate:</span>
-            <span className="font-bold text-emerald-400 text-sm font-mono">
+            <span className="font-bold text-emerald-400 text-sm 2xl:text-lg font-mono">
               {formatPercent(summary.savingsRatePercent, 1)}
             </span>
           </div>
         </div>
 
         {/* Expense Distribution Visualizer & Health Summary */}
-        <div className="lg:col-span-7 bg-white/5 backdrop-blur-lg rounded-2xl p-6 border border-white/10 shadow-xl shadow-black/10 flex flex-col justify-between">
+        <div className="w-full bg-white/5 backdrop-blur-lg rounded-2xl p-6 2xl:p-8 border border-white/10 shadow-xl shadow-black/10 flex flex-col justify-between">
           <div className="flex items-center justify-between mb-4">
             <div>
-              <h2 className="text-base font-bold text-white">
+              <h2 className="text-base 2xl:text-xl font-bold text-white">
                 Monthly Expense Allocation
               </h2>
-              <p className="text-xs text-slate-400">
+              <p className="text-xs 2xl:text-sm text-slate-400">
                 Categorical breakdown of household fixed &amp; variable overhead
               </p>
             </div>
             <div className="text-right">
-              <span className="text-xs text-slate-400">Total Monthly Commitments</span>
-              <div className="text-xl font-black font-mono text-white">
+              <span className="text-xs 2xl:text-sm text-slate-400">Total Monthly Commitments</span>
+              <div className="text-xl 2xl:text-3xl font-black font-mono text-white">
                 {formatCurrency(summary.totalMonthlyCommitments)}
               </div>
             </div>
@@ -549,22 +549,22 @@ export function BudgetModule({
           </div>
 
           {/* Quick Metrics Bar */}
-          <div className="grid grid-cols-3 gap-2 pt-4 border-t border-white/10 text-center">
-            <div className="p-2.5 rounded-xl bg-white/5 border border-white/5 backdrop-blur-sm">
-              <div className="text-[11px] text-slate-400">Fixed Overhead</div>
-              <div className="text-sm font-bold text-slate-200 font-mono">
+          <div className="grid grid-cols-3 gap-2 2xl:gap-3 pt-4 border-t border-white/10 text-center">
+            <div className="p-2.5 2xl:p-4 rounded-xl bg-white/5 border border-white/5 backdrop-blur-sm">
+              <div className="text-[11px] 2xl:text-xs text-slate-400">Fixed Overhead</div>
+              <div className="text-sm 2xl:text-base font-bold text-slate-200 font-mono">
                 {formatCurrency(summary.totalFixedExpenses)}
               </div>
             </div>
-            <div className="p-2.5 rounded-xl bg-white/5 border border-white/5 backdrop-blur-sm">
-              <div className="text-[11px] text-slate-400">Variable Discretionary</div>
-              <div className="text-sm font-bold text-slate-200 font-mono">
+            <div className="p-2.5 2xl:p-4 rounded-xl bg-white/5 border border-white/5 backdrop-blur-sm">
+              <div className="text-[11px] 2xl:text-xs text-slate-400">Variable Discretionary</div>
+              <div className="text-sm 2xl:text-base font-bold text-slate-200 font-mono">
                 {formatCurrency(summary.totalVariableExpenses)}
               </div>
             </div>
-            <div className="p-2.5 rounded-xl bg-indigo-900/30 border border-indigo-500/20 backdrop-blur-sm">
-              <div className="text-[11px] text-indigo-300">Sinking Funds Siphon</div>
-              <div className="text-sm font-bold text-emerald-400 font-mono">
+            <div className="p-2.5 2xl:p-4 rounded-xl bg-indigo-900/30 border border-indigo-500/20 backdrop-blur-sm">
+              <div className="text-[11px] 2xl:text-xs text-indigo-300">Sinking Funds Siphon</div>
+              <div className="text-sm 2xl:text-base font-bold text-emerald-400 font-mono">
                 {formatCurrency(summary.totalMonthlySinkingCommitment)}
               </div>
             </div>
@@ -573,18 +573,18 @@ export function BudgetModule({
       </div>
 
       {/* Sinking Funds & Sinking Accounts Section */}
-      <div className="bg-white/5 backdrop-blur-lg rounded-2xl p-6 border border-white/10 shadow-xl shadow-black/10">
+      <div className="bg-white/5 backdrop-blur-lg rounded-2xl p-6 2xl:p-8 border border-white/10 shadow-xl shadow-black/10">
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-6">
           <div>
-            <div className="flex items-center space-x-2.5">
-              <span className="p-2.5 rounded-xl bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
-                <PiggyBank className="w-5 h-5" />
+            <div className="flex items-center space-x-2.5 2xl:space-x-3">
+              <span className="p-2.5 2xl:p-3 rounded-xl bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+                <PiggyBank className="w-5 h-5 2xl:w-6 2xl:h-6" />
               </span>
               <div>
-                <h2 className="text-base font-bold text-white">
+                <h2 className="text-base 2xl:text-xl font-bold text-white">
                   Dedicated Sinking Funds &amp; Family Reserves
                 </h2>
-                <p className="text-xs text-slate-400">
+                <p className="text-xs 2xl:text-sm text-slate-400">
                   Ring-fenced accounts for education, emergency runway, property upgrades, and getaways
                 </p>
               </div>
@@ -594,7 +594,7 @@ export function BudgetModule({
           <div className="flex items-center space-x-2">
             <button
               onClick={() => setShowAddSinkingModal(true)}
-              className="flex items-center space-x-1.5 text-xs font-semibold bg-emerald-600 hover:bg-emerald-500 border border-emerald-400/50 text-white px-3.5 py-2 rounded-xl transition-all shadow-lg shadow-emerald-600/20"
+              className="flex items-center space-x-1.5 text-xs 2xl:text-sm font-semibold bg-emerald-600 hover:bg-emerald-500 border border-emerald-400/50 text-white px-3.5 2xl:px-4 py-2 2xl:py-2.5 rounded-xl transition-all shadow-lg shadow-emerald-600/20"
             >
               <Plus className="w-4 h-4" />
               <span>Create Sinking Fund</span>
@@ -603,7 +603,7 @@ export function BudgetModule({
         </div>
 
         {/* Sinking Fund Cards Grid */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-3 gap-4 2xl:gap-6">
           {state.sinkingFunds.map((fund) => {
             const progress =
               fund.targetBalance > 0
@@ -616,20 +616,20 @@ export function BudgetModule({
             return (
               <div
                 key={fund.id}
-                className="p-4 rounded-xl border border-white/10 bg-white/5 backdrop-blur-md flex flex-col justify-between hover:border-emerald-400/40 hover:bg-white/10 transition-all shadow-md shadow-black/10"
+                className="p-4 2xl:p-5 rounded-xl border border-white/10 bg-white/5 backdrop-blur-md flex flex-col justify-between hover:border-emerald-400/40 hover:bg-white/10 transition-all shadow-md shadow-black/10"
               >
                 <div>
                   <div className="flex items-start justify-between mb-2">
-                    <span className="text-xs font-bold uppercase tracking-wider text-emerald-300 bg-emerald-950/60 border border-emerald-500/30 px-2.5 py-0.5 rounded-lg">
+                    <span className="text-xs 2xl:text-sm font-bold uppercase tracking-wider text-emerald-300 bg-emerald-950/60 border border-emerald-500/30 px-2.5 py-0.5 rounded-lg">
                       {fund.category}
                     </span>
                     <div className="flex items-center space-x-2">
                       <button
                         onClick={() => openEditFund(fund)}
-                        className="px-2 py-0.5 text-xs text-slate-300 hover:text-emerald-300 hover:bg-white/10 rounded-lg transition-colors flex items-center space-x-1 border border-white/10"
+                        className="px-2 py-0.5 text-xs 2xl:text-sm text-slate-300 hover:text-emerald-300 hover:bg-white/10 rounded-lg transition-colors flex items-center space-x-1 border border-white/10"
                         title="Edit fund goals & settings"
                       >
-                        <Edit2 className="w-3 h-3" />
+                        <Edit2 className="w-3 h-3 2xl:w-3.5 2xl:h-3.5" />
                         <span>Edit</span>
                       </button>
                       <button
@@ -637,18 +637,18 @@ export function BudgetModule({
                           setSelectedFundForAdjust(fund);
                           setFundAdjustType('deposit');
                         }}
-                        className="text-xs font-semibold text-slate-300 hover:text-emerald-300 transition-colors underline decoration-dotted"
+                        className="text-xs 2xl:text-sm font-semibold text-slate-300 hover:text-emerald-300 transition-colors underline decoration-dotted"
                       >
                         Deposit / Withdraw
                       </button>
                     </div>
                   </div>
 
-                  <h3 className="text-sm font-bold text-white truncate">
+                  <h3 className="text-sm 2xl:text-base font-bold text-white truncate">
                     {fund.name}
                   </h3>
                   {fund.notes && (
-                    <p className="text-[11px] text-slate-400 line-clamp-2 mt-0.5">
+                    <p className="text-[11px] 2xl:text-xs text-slate-400 line-clamp-2 mt-0.5">
                       {fund.notes}
                     </p>
                   )}
@@ -656,14 +656,14 @@ export function BudgetModule({
                   {/* Balance Display */}
                   <div className="mt-3 flex items-baseline justify-between">
                     <div>
-                      <span className="text-[11px] text-slate-400">Current Balance</span>
-                      <div className="text-lg font-extrabold font-mono text-white">
+                      <span className="text-[11px] 2xl:text-xs text-slate-400">Current Balance</span>
+                      <div className="text-lg 2xl:text-2xl font-extrabold font-mono text-white">
                         {formatCurrency(fund.currentBalance)}
                       </div>
                     </div>
                     <div className="text-right">
-                      <span className="text-[11px] text-slate-400">Target</span>
-                      <div className="text-sm font-semibold font-mono text-slate-300">
+                      <span className="text-[11px] 2xl:text-xs text-slate-400">Target</span>
+                      <div className="text-sm 2xl:text-base font-semibold font-mono text-slate-300">
                         {formatCurrency(fund.targetBalance)}
                       </div>
                     </div>
@@ -671,13 +671,13 @@ export function BudgetModule({
 
                   {/* Progress Bar */}
                   <div className="mt-2.5">
-                    <div className="flex justify-between text-[11px] font-medium text-slate-400 mb-1">
+                    <div className="flex justify-between text-[11px] 2xl:text-xs font-medium text-slate-400 mb-1">
                       <span>{progress.toFixed(1)}% funded</span>
                       <span>
                         {monthsToGoal > 0 ? `~${monthsToGoal} mos left` : 'Target Met 🎉'}
                       </span>
                     </div>
-                    <div className="h-2 w-full rounded-full bg-slate-900/60 border border-white/10 overflow-hidden">
+                    <div className="h-2 2xl:h-2.5 w-full rounded-full bg-slate-900/60 border border-white/10 overflow-hidden">
                       <div
                         style={{ width: `${progress}%` }}
                         className={`h-full rounded-full transition-all duration-500 ${
@@ -690,7 +690,7 @@ export function BudgetModule({
                   </div>
                 </div>
 
-                <div className="mt-4 pt-3 border-t border-white/10 flex items-center justify-between text-xs text-slate-400">
+                <div className="mt-4 pt-3 border-t border-white/10 flex items-center justify-between text-xs 2xl:text-sm text-slate-400">
                   <span>Monthly Siphon:</span>
                   <span className="font-semibold font-mono text-emerald-400">
                     +{formatCurrency(fund.monthlyContribution)}/mo
@@ -703,30 +703,30 @@ export function BudgetModule({
       </div>
 
       {/* Gamified Savings Milestones Section */}
-      <div className="bg-white/5 backdrop-blur-lg rounded-2xl p-6 border border-white/10 shadow-xl shadow-black/10">
-        <div className="flex items-center justify-between mb-4">
-          <div className="flex items-center space-x-2.5">
-            <span className="p-2.5 rounded-xl bg-amber-500/20 text-amber-300 border border-amber-500/30">
-              <Sparkles className="w-5 h-5" />
+      <div className="bg-white/5 backdrop-blur-lg rounded-2xl p-6 2xl:p-8 border border-white/10 shadow-xl shadow-black/10">
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4">
+          <div className="flex items-center space-x-2.5 2xl:space-x-3">
+            <span className="p-2.5 2xl:p-3 rounded-xl bg-amber-500/20 text-amber-300 border border-amber-500/30">
+              <Sparkles className="w-5 h-5 2xl:w-6 2xl:h-6" />
             </span>
             <div>
-              <h2 className="text-base font-bold text-white">
+              <h2 className="text-base 2xl:text-xl font-bold text-white">
                 Family Milestone Vault
               </h2>
-              <p className="text-xs text-slate-400">
+              <p className="text-xs 2xl:text-sm text-slate-400">
                 Unlock achievements together as household liquid net worth compounds
               </p>
             </div>
           </div>
-          <div className="text-xs text-slate-400">
+          <div className="text-xs 2xl:text-sm text-slate-400">
             Total Sinking Reserves:{' '}
-            <strong className="text-emerald-400 font-mono text-sm ml-1">
+            <strong className="text-emerald-400 font-mono text-sm 2xl:text-base ml-1">
               {formatCurrency(summary.totalSinkingCurrentBalance)}
             </strong>
           </div>
         </div>
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3.5 pt-2">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3.5 2xl:gap-5 pt-2">
           {state.milestones.map((m) => {
             const isUnlocked = summary.totalSinkingCurrentBalance >= m.targetAmount || m.unlocked;
             const progress = Math.min(
@@ -738,7 +738,7 @@ export function BudgetModule({
               <div
                 key={m.id}
                 onClick={() => isUnlocked && triggerMilestoneCheer(m)}
-                className={`p-4 rounded-xl border flex flex-col justify-between transition-all cursor-pointer backdrop-blur-md ${
+                className={`p-4 2xl:p-5 rounded-xl border flex flex-col justify-between transition-all cursor-pointer backdrop-blur-md ${
                   isUnlocked
                     ? 'bg-amber-950/30 border-amber-500/40 shadow-lg shadow-amber-950/20 hover:scale-[1.02]'
                     : 'bg-white/5 border-white/10 opacity-70 hover:opacity-90'
@@ -746,30 +746,30 @@ export function BudgetModule({
               >
                 <div>
                   <div className="flex items-center justify-between mb-2">
-                    <span className="text-xl">{m.rewardBadge.split(' ')[0]}</span>
+                    <span className="text-xl 2xl:text-2xl">{m.rewardBadge.split(' ')[0]}</span>
                     {isUnlocked ? (
-                      <span className="flex items-center text-[10px] font-bold text-amber-300 bg-amber-500/20 border border-amber-500/30 px-2 py-0.5 rounded-full">
-                        <CheckCircle2 className="w-3 h-3 mr-1 text-amber-400" /> UNLOCKED
+                      <span className="flex items-center text-[10px] 2xl:text-xs font-bold text-amber-300 bg-amber-500/20 border border-amber-500/30 px-2 py-0.5 rounded-full">
+                        <CheckCircle2 className="w-3 h-3 2xl:w-3.5 2xl:h-3.5 mr-1 text-amber-400" /> UNLOCKED
                       </span>
                     ) : (
-                      <span className="flex items-center text-[10px] font-semibold text-slate-400 bg-white/10 px-2 py-0.5 rounded-full">
-                        <Lock className="w-3 h-3 mr-1" /> {progress.toFixed(0)}%
+                      <span className="flex items-center text-[10px] 2xl:text-xs font-semibold text-slate-400 bg-white/10 px-2 py-0.5 rounded-full">
+                        <Lock className="w-3 h-3 2xl:w-3.5 2xl:h-3.5 mr-1" /> {progress.toFixed(0)}%
                       </span>
                     )}
                   </div>
 
-                  <h4 className="text-xs font-bold text-white">{m.title}</h4>
-                  <p className="text-[11px] text-slate-400 mt-1 leading-snug line-clamp-2">
+                  <h4 className="text-xs 2xl:text-sm font-bold text-white">{m.title}</h4>
+                  <p className="text-[11px] 2xl:text-xs text-slate-400 mt-1 leading-snug line-clamp-2">
                     {m.description}
                   </p>
                 </div>
 
                 <div className="mt-3 pt-2 border-t border-white/10">
-                  <div className="flex justify-between text-[10px] font-mono text-slate-400 mb-1">
+                  <div className="flex justify-between text-[10px] 2xl:text-xs font-mono text-slate-400 mb-1">
                     <span>Target:</span>
                     <span>{formatCurrency(m.targetAmount)}</span>
                   </div>
-                  <div className="h-1.5 w-full rounded-full bg-slate-900/60 border border-white/10 overflow-hidden">
+                  <div className="h-1.5 2xl:h-2 w-full rounded-full bg-slate-900/60 border border-white/10 overflow-hidden">
                     <div
                       style={{ width: `${progress}%` }}
                       className={`h-full rounded-full ${
@@ -785,20 +785,20 @@ export function BudgetModule({
       </div>
 
       {/* Household Fixed vs Variable Expenses Ledger */}
-      <div className="bg-white/5 backdrop-blur-lg rounded-2xl p-6 border border-white/10 shadow-xl shadow-black/10">
+      <div className="bg-white/5 backdrop-blur-lg rounded-2xl p-6 2xl:p-8 border border-white/10 shadow-xl shadow-black/10">
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-6">
           <div>
-            <h2 className="text-base font-bold text-white">
+            <h2 className="text-base 2xl:text-xl font-bold text-white">
               Recurring Monthly Expenses Ledger
             </h2>
-            <p className="text-xs text-slate-400">
+            <p className="text-xs 2xl:text-sm text-slate-400">
               Track fixed obligations (mortgage, childcare, insurance) and variable family commitments
             </p>
           </div>
 
-          <div className="flex items-center space-x-2">
+          <div className="flex flex-wrap items-center gap-2">
             {/* Filter Buttons */}
-            <div className="flex bg-white/5 border border-white/10 p-1 rounded-xl text-xs font-medium">
+            <div className="flex bg-white/5 border border-white/10 p-1 rounded-xl text-xs 2xl:text-sm font-medium">
               <button
                 onClick={() => setFilterFixed('all')}
                 className={`px-3 py-1 rounded-lg transition-all ${
@@ -834,7 +834,7 @@ export function BudgetModule({
             {onNavigateToActuals && (
               <button
                 onClick={onNavigateToActuals}
-                className="flex items-center space-x-1.5 text-xs font-semibold bg-indigo-600/30 hover:bg-indigo-600/50 text-indigo-200 border border-indigo-400/40 px-3.5 py-2 rounded-xl transition-all shadow-md shrink-0"
+                className="flex items-center space-x-1.5 text-xs 2xl:text-sm font-semibold bg-indigo-600/30 hover:bg-indigo-600/50 text-indigo-200 border border-indigo-400/40 px-3.5 2xl:px-4 py-2 rounded-xl transition-all shadow-md shrink-0"
               >
                 <BarChart3 className="w-4 h-4 text-indigo-300" />
                 <span>Budget vs. Actuals</span>
@@ -843,7 +843,7 @@ export function BudgetModule({
 
             <button
               onClick={() => setShowAddExpenseModal(true)}
-              className="flex items-center space-x-1.5 text-xs font-semibold bg-rose-600 hover:bg-rose-500 border border-rose-400/50 text-white px-3.5 py-2 rounded-xl transition-all shadow-lg shadow-rose-600/20 shrink-0"
+              className="flex items-center space-x-1.5 text-xs 2xl:text-sm font-semibold bg-rose-600 hover:bg-rose-500 border border-rose-400/50 text-white px-3.5 2xl:px-4 py-2 rounded-xl transition-all shadow-lg shadow-rose-600/20 shrink-0"
             >
               <Plus className="w-4 h-4" />
               <span>Add Recurring Bill</span>
@@ -853,21 +853,21 @@ export function BudgetModule({
 
         {/* Expenses Table */}
         <div className="overflow-x-auto rounded-xl border border-white/10">
-          <table className="w-full text-left text-xs">
-            <thead className="bg-white/5 text-slate-400 uppercase tracking-wider font-semibold border-b border-white/10 text-[11px]">
+          <table className="w-full text-left text-xs 2xl:text-sm">
+            <thead className="bg-white/5 text-slate-400 uppercase tracking-wider font-semibold border-b border-white/10 text-[11px] 2xl:text-xs">
               <tr>
-                <th className="py-3 px-4">Item &amp; Notes</th>
-                <th className="py-3 px-3">Category</th>
-                <th className="py-3 px-3">Type</th>
-                <th className="py-3 px-3">Split Logic</th>
-                <th className="py-3 px-3 text-right">Monthly Cost</th>
-                <th className="py-3 px-3 text-right text-rose-300">
+                <th className="py-3 2xl:py-4 px-4 2xl:px-5">Item &amp; Notes</th>
+                <th className="py-3 2xl:py-4 px-3 2xl:px-4">Category</th>
+                <th className="py-3 2xl:py-4 px-3 2xl:px-4">Type</th>
+                <th className="py-3 2xl:py-4 px-3 2xl:px-4">Split Logic</th>
+                <th className="py-3 2xl:py-4 px-3 2xl:px-4 text-right">Monthly Cost</th>
+                <th className="py-3 2xl:py-4 px-3 2xl:px-4 text-right text-rose-300">
                   Bunny Share
                 </th>
-                <th className="py-3 px-3 text-right text-teal-300">
+                <th className="py-3 2xl:py-4 px-3 2xl:px-4 text-right text-teal-300">
                   Monkey Share
                 </th>
-                <th className="py-3 px-3 text-center">Action</th>
+                <th className="py-3 2xl:py-4 px-3 2xl:px-4 text-center">Action</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-white/5">
@@ -882,15 +882,15 @@ export function BudgetModule({
                     key={exp.id}
                     className="hover:bg-white/5 transition-colors"
                   >
-                    <td className="py-3 px-4 font-medium text-slate-200">
-                      <div>{exp.title}</div>
+                    <td className="py-3 2xl:py-4 px-4 2xl:px-5 font-medium text-slate-200">
+                      <div className="text-xs 2xl:text-sm">{exp.title}</div>
                       {exp.notes && (
-                        <div className="text-[11px] text-slate-400 font-normal">{exp.notes}</div>
+                        <div className="text-[11px] 2xl:text-xs text-slate-400 font-normal">{exp.notes}</div>
                       )}
                     </td>
-                    <td className="py-3 px-3">
+                    <td className="py-3 2xl:py-4 px-3 2xl:px-4">
                       <span
-                        className="px-2.5 py-0.5 rounded-md text-[10px] font-semibold text-white shadow-xs"
+                        className="px-2.5 py-0.5 2xl:px-3 2xl:py-1 rounded-md text-[10px] 2xl:text-xs font-semibold text-white shadow-xs"
                         style={{
                           backgroundColor: CATEGORY_COLORS[exp.category] || '#64748b',
                         }}
@@ -898,9 +898,9 @@ export function BudgetModule({
                         {exp.category}
                       </span>
                     </td>
-                    <td className="py-3 px-3">
+                    <td className="py-3 2xl:py-4 px-3 2xl:px-4">
                       <span
-                        className={`px-2 py-0.5 rounded-full text-[10px] font-medium border ${
+                        className={`px-2 py-0.5 2xl:px-2.5 2xl:py-1 rounded-full text-[10px] 2xl:text-xs font-medium border ${
                           exp.isFixed
                             ? 'bg-white/5 border-white/10 text-slate-300'
                             : 'bg-amber-500/20 border-amber-500/30 text-amber-300'
@@ -909,42 +909,42 @@ export function BudgetModule({
                         {exp.isFixed ? 'Fixed' : 'Variable'}
                       </span>
                     </td>
-                    <td className="py-3 px-3 font-medium text-slate-400">
+                    <td className="py-3 2xl:py-4 px-3 2xl:px-4 font-medium text-slate-400">
                       {exp.splitMethod === 'proportional' && 'Proportional'}
                       {exp.splitMethod === 'equal' && '50 / 50'}
                       {exp.splitMethod === 'custom' && `Custom (${exp.customBunnyPercent || 50}% B)`}
                       {exp.splitMethod === 'fixed_dollar' && (
-                        <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-amber-300 bg-amber-500/10 border border-amber-500/20 px-2 py-0.5 rounded-md">
+                        <span className="inline-flex items-center gap-1 text-[10px] 2xl:text-xs font-semibold text-amber-300 bg-amber-500/10 border border-amber-500/20 px-2 py-0.5 rounded-md">
                           {exp.fixedPayer === 'monkey'
                             ? `🐵 Fixed ${formatCurrency(exp.fixedAmount || 0)}`
                             : `🐰 Fixed ${formatCurrency(exp.fixedAmount || 0)}`}
                         </span>
                       )}
                     </td>
-                    <td className="py-3 px-3 text-right font-mono font-bold text-white">
+                    <td className="py-3 2xl:py-4 px-3 2xl:px-4 text-right font-mono font-bold text-white text-xs 2xl:text-sm">
                       {formatCurrency(exp.monthlyAmount)}
                     </td>
-                    <td className="py-3 px-3 text-right font-mono font-semibold text-rose-300">
+                    <td className="py-3 2xl:py-4 px-3 2xl:px-4 text-right font-mono font-semibold text-rose-300 text-xs 2xl:text-sm">
                       {formatCurrency(alloc.bunnyShare)}
                     </td>
-                    <td className="py-3 px-3 text-right font-mono font-semibold text-teal-300">
+                    <td className="py-3 2xl:py-4 px-3 2xl:px-4 text-right font-mono font-semibold text-teal-300 text-xs 2xl:text-sm">
                       {formatCurrency(alloc.monkeyShare)}
                     </td>
-                    <td className="py-3 px-3 text-center">
-                      <div className="flex items-center justify-center space-x-1">
+                    <td className="py-3 2xl:py-4 px-3 2xl:px-4 text-center">
+                      <div className="flex items-center justify-center space-x-1 2xl:space-x-2">
                         <button
                           onClick={() => openEditExpense(exp)}
-                          className="p-1.5 text-slate-400 hover:text-indigo-300 hover:bg-indigo-500/20 rounded-lg transition-all"
+                          className="p-1.5 2xl:p-2 text-slate-400 hover:text-indigo-300 hover:bg-indigo-500/20 rounded-lg transition-all"
                           title="Modify bill / expense"
                         >
-                          <Edit2 className="w-3.5 h-3.5" />
+                          <Edit2 className="w-3.5 h-3.5 2xl:w-4 2xl:h-4" />
                         </button>
                         <button
                           onClick={() => handleDeleteExpense(exp.id)}
-                          className="p-1.5 text-slate-400 hover:text-rose-400 hover:bg-rose-500/20 rounded-lg transition-all"
+                          className="p-1.5 2xl:p-2 text-slate-400 hover:text-rose-400 hover:bg-rose-500/20 rounded-lg transition-all"
                           title="Delete expense"
                         >
-                          <Trash2 className="w-3.5 h-3.5" />
+                          <Trash2 className="w-3.5 h-3.5 2xl:w-4 2xl:h-4" />
                         </button>
                       </div>
                     </td>
@@ -954,16 +954,16 @@ export function BudgetModule({
             </tbody>
             <tfoot className="bg-white/5 font-bold border-t border-white/10 text-slate-200">
               <tr>
-                <td colSpan={4} className="py-3 px-4 text-slate-300">
+                <td colSpan={4} className="py-3 2xl:py-4 px-4 2xl:px-5 text-slate-300">
                   Total Recurring Overhead (Fixed + Variable)
                 </td>
-                <td className="py-3 px-3 text-right font-mono text-white">
+                <td className="py-3 2xl:py-4 px-3 2xl:px-4 text-right font-mono text-white text-xs 2xl:text-sm">
                   {formatCurrency(summary.totalFixedExpenses + summary.totalVariableExpenses)}
                 </td>
-                <td className="py-3 px-3 text-right font-mono text-rose-300">
+                <td className="py-3 2xl:py-4 px-3 2xl:px-4 text-right font-mono text-rose-300 text-xs 2xl:text-sm">
                   {formatCurrency(summary.bunnyFixedOwed + summary.bunnyVariableOwed)}
                 </td>
-                <td className="py-3 px-3 text-right font-mono text-teal-300">
+                <td className="py-3 2xl:py-4 px-3 2xl:px-4 text-right font-mono text-teal-300 text-xs 2xl:text-sm">
                   {formatCurrency(summary.monkeyFixedOwed + summary.monkeyVariableOwed)}
                 </td>
                 <td></td>

@@ -512,22 +512,22 @@ export function TripSettlementModule({ state, onUpdateState }: TripSettlementMod
   };
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 2xl:space-y-8">
       {/* Top Banner & Trip Selector */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-white/5 border border-white/10 p-5 rounded-2xl backdrop-blur-md">
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-white/5 border border-white/10 p-5 2xl:p-6 rounded-2xl backdrop-blur-md">
         <div className="space-y-1">
-          <div className="flex items-center space-x-2">
-            <span className="p-2 rounded-xl bg-teal-500/20 text-teal-300 border border-teal-500/30">
-              <Plane className="w-5 h-5" />
+          <div className="flex items-center space-x-2 2xl:space-x-3">
+            <span className="p-2 2xl:p-2.5 rounded-xl bg-teal-500/20 text-teal-300 border border-teal-500/30">
+              <Plane className="w-5 h-5 2xl:w-6 2xl:h-6" />
             </span>
             <div>
-              <h2 className="text-xl font-bold text-white tracking-tight flex items-center gap-2">
+              <h2 className="text-xl 2xl:text-2xl font-bold text-white tracking-tight flex items-center gap-2">
                 Trip &amp; Vacation Tracker
-                <span className="text-[10px] font-semibold uppercase tracking-widest px-2.5 py-0.5 rounded-full bg-teal-500/20 text-teal-300 border border-teal-500/40">
+                <span className="text-[10px] 2xl:text-xs font-semibold uppercase tracking-widest px-2.5 py-0.5 rounded-full bg-teal-500/20 text-teal-300 border border-teal-500/40">
                   Sinking Fund Powered
                 </span>
               </h2>
-              <p className="text-xs text-slate-400">
+              <p className="text-xs 2xl:text-sm text-slate-400">
                 Track family travel expenses and cover them directly from your pre-established Vacation Sinking Fund.
               </p>
             </div>
@@ -536,14 +536,14 @@ export function TripSettlementModule({ state, onUpdateState }: TripSettlementMod
 
         {/* Trip Switcher & Actions */}
         <div className="flex flex-wrap items-center gap-2 sm:gap-3">
-          <div className="flex items-center bg-black/30 border border-white/10 rounded-xl px-3 py-1.5">
-            <MapPin className="w-4 h-4 text-teal-400 mr-2 shrink-0" />
+          <div className="flex items-center bg-black/30 border border-white/10 rounded-xl px-3 2xl:px-4 py-1.5 2xl:py-2">
+            <MapPin className="w-4 h-4 2xl:w-5 2xl:h-5 text-teal-400 mr-2 shrink-0" />
             <select
               value={activeTrip.id}
               onChange={(e) =>
                 onUpdateState((prev) => ({ ...prev, activeTripId: e.target.value }))
               }
-              className="bg-transparent text-sm font-semibold text-white focus:outline-none cursor-pointer max-w-[180px] sm:max-w-[240px] truncate"
+              className="bg-transparent text-sm 2xl:text-base font-semibold text-white focus:outline-none cursor-pointer max-w-[180px] sm:max-w-[240px] 2xl:max-w-[300px] truncate"
             >
               {state.trips.map((t) => (
                 <option key={t.id} value={t.id} className="bg-slate-900 text-white">
@@ -557,10 +557,10 @@ export function TripSettlementModule({ state, onUpdateState }: TripSettlementMod
           <button
             type="button"
             onClick={() => setTripToDelete(activeTrip)}
-            className="p-2 text-slate-400 hover:text-rose-400 hover:bg-rose-500/10 rounded-xl border border-white/10 transition-colors flex items-center gap-1.5 text-xs"
+            className="p-2 2xl:p-2.5 text-slate-400 hover:text-rose-400 hover:bg-rose-500/10 rounded-xl border border-white/10 transition-colors flex items-center gap-1.5 text-xs 2xl:text-sm"
             title="Delete this trip"
           >
-            <Trash2 className="w-4 h-4" />
+            <Trash2 className="w-4 h-4 2xl:w-5 2xl:h-5" />
             <span className="hidden md:inline">Delete Trip</span>
           </button>
 
@@ -568,56 +568,56 @@ export function TripSettlementModule({ state, onUpdateState }: TripSettlementMod
           <button
             type="button"
             onClick={() => setShowManageTripsModal(true)}
-            className="flex items-center space-x-1 px-3 py-2 text-xs font-semibold bg-white/5 hover:bg-white/10 text-slate-300 hover:text-white rounded-xl border border-white/10 transition-all shadow-sm"
+            className="flex items-center space-x-1.5 px-3 2xl:px-4 py-2 2xl:py-2.5 text-xs 2xl:text-sm font-semibold bg-white/5 hover:bg-white/10 text-slate-300 hover:text-white rounded-xl border border-white/10 transition-all shadow-sm"
             title="Manage all trips"
           >
-            <Layers className="w-3.5 h-3.5" />
+            <Layers className="w-3.5 h-3.5 2xl:w-4 2xl:h-4" />
             <span>Manage Trips</span>
           </button>
 
           <button
             type="button"
             onClick={() => setShowNewTripModal(true)}
-            className="flex items-center space-x-1 px-3.5 py-2 text-xs font-semibold bg-teal-500/20 hover:bg-teal-500/30 text-teal-300 rounded-xl border border-teal-500/30 transition-all shadow-sm"
+            className="flex items-center space-x-1.5 px-3.5 2xl:px-4 py-2 2xl:py-2.5 text-xs 2xl:text-sm font-semibold bg-teal-500/20 hover:bg-teal-500/30 text-teal-300 rounded-xl border border-teal-500/30 transition-all shadow-sm"
           >
-            <Plus className="w-3.5 h-3.5" />
+            <Plus className="w-3.5 h-3.5 2xl:w-4 2xl:h-4" />
             <span>New Trip</span>
           </button>
         </div>
       </div>
 
       {/* Philosophy Notice: No Settlement Needed */}
-      <div className="p-3.5 bg-emerald-500/10 border border-emerald-500/20 rounded-xl flex items-center justify-between text-xs text-emerald-200">
+      <div className="p-3.5 2xl:p-4 bg-emerald-500/10 border border-emerald-500/20 rounded-xl flex items-center justify-between text-xs 2xl:text-sm text-emerald-200">
         <div className="flex items-center space-x-2.5">
-          <ShieldCheck className="w-4 h-4 text-emerald-400 shrink-0" />
+          <ShieldCheck className="w-4 h-4 2xl:w-5 2xl:h-5 text-emerald-400 shrink-0" />
           <span>
             <strong>Zero Debt Friction:</strong> Bunny and Monkey do not owe each other money for vacations. All trip expenses are tracked for family clarity and funded/reimbursed from your <strong>{vacationFund?.name || 'Vacation Sinking Fund'}</strong>.
           </span>
         </div>
         {vacationFund && (
-          <span className="hidden sm:inline-block text-[11px] font-mono font-bold bg-emerald-500/20 text-emerald-300 px-2 py-0.5 rounded border border-emerald-500/30">
+          <span className="hidden sm:inline-block text-[11px] 2xl:text-xs font-mono font-bold bg-emerald-500/20 text-emerald-300 px-2.5 py-1 rounded border border-emerald-500/30">
             Available Fund: {formatCurrency(vacationFund.currentBalance)}
           </span>
         )}
       </div>
 
       {/* Master Trip KPIs */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 2xl:gap-6">
         {/* Total Spend & Budget */}
-        <div className="p-5 rounded-2xl bg-white/5 border border-white/10 backdrop-blur-md relative overflow-hidden">
+        <div className="p-5 2xl:p-6 rounded-2xl bg-white/5 border border-white/10 backdrop-blur-md relative overflow-hidden">
           <div className="flex justify-between items-start mb-2">
-            <span className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider">
+            <span className="text-[11px] 2xl:text-xs font-semibold text-slate-400 uppercase tracking-wider">
               Total Trip Spend
             </span>
-            <span className="text-xs font-mono font-bold text-teal-400">
+            <span className="text-xs 2xl:text-sm font-mono font-bold text-teal-400">
               Budget: {formatCurrency(activeTrip.budget)}
             </span>
           </div>
-          <div className="text-2xl font-bold font-mono text-white mb-2">
+          <div className="text-2xl 2xl:text-3xl font-bold font-mono text-white mb-2">
             {formatCurrency(trackingInfo.totalTripSpend)}
           </div>
           {/* Progress bar */}
-          <div className="w-full bg-white/10 rounded-full h-2 overflow-hidden mb-1.5">
+          <div className="w-full bg-white/10 rounded-full h-2 2xl:h-2.5 overflow-hidden mb-1.5">
             <div
               className={`h-full transition-all ${
                 budgetUsedPct > 90 ? 'bg-rose-500' : 'bg-teal-400'
@@ -625,7 +625,7 @@ export function TripSettlementModule({ state, onUpdateState }: TripSettlementMod
               style={{ width: `${budgetUsedPct}%` }}
             />
           </div>
-          <div className="flex justify-between text-[10px] text-slate-400">
+          <div className="flex justify-between text-[10px] 2xl:text-xs text-slate-400 font-mono">
             <span>{budgetUsedPct.toFixed(0)}% budget utilized</span>
             <span>
               Remaining: {formatCurrency(Math.max(0, activeTrip.budget - trackingInfo.totalTripSpend))}
@@ -634,17 +634,17 @@ export function TripSettlementModule({ state, onUpdateState }: TripSettlementMod
         </div>
 
         {/* Covered by Sinking Fund */}
-        <div className="p-5 rounded-2xl bg-indigo-950/40 border border-indigo-500/30 backdrop-blur-md relative overflow-hidden">
+        <div className="p-5 2xl:p-6 rounded-2xl bg-indigo-950/40 border border-indigo-500/30 backdrop-blur-md relative overflow-hidden">
           <div className="flex justify-between items-start mb-2">
-            <span className="text-[11px] font-semibold text-indigo-300 uppercase tracking-wider">
+            <span className="text-[11px] 2xl:text-xs font-semibold text-indigo-300 uppercase tracking-wider">
               Covered by Sinking Fund
             </span>
-            <Wallet className="w-4 h-4 text-indigo-400" />
+            <Wallet className="w-4 h-4 2xl:w-5 2xl:h-5 text-indigo-400" />
           </div>
-          <div className="text-2xl font-bold font-mono text-indigo-200 mb-1">
+          <div className="text-2xl 2xl:text-3xl font-bold font-mono text-indigo-200 mb-1">
             {formatCurrency(trackingInfo.totalCoveredBySinkingFund)}
           </div>
-          <p className="text-[11px] text-indigo-300/80">
+          <p className="text-[11px] 2xl:text-xs text-indigo-300/80">
             {trackingInfo.totalTripSpend > 0
               ? `${((trackingInfo.totalCoveredBySinkingFund / trackingInfo.totalTripSpend) * 100).toFixed(0)}% of expenses covered from fund`
               : 'Directly paid or reimbursed from fund'}
@@ -652,46 +652,46 @@ export function TripSettlementModule({ state, onUpdateState }: TripSettlementMod
         </div>
 
         {/* Vacation Sinking Fund Balance */}
-        <div className="p-5 rounded-2xl bg-teal-950/40 border border-teal-500/30 backdrop-blur-md relative overflow-hidden">
+        <div className="p-5 2xl:p-6 rounded-2xl bg-teal-950/40 border border-teal-500/30 backdrop-blur-md relative overflow-hidden">
           <div className="flex justify-between items-start mb-2">
-            <span className="text-[11px] font-semibold text-teal-300 uppercase tracking-wider">
+            <span className="text-[11px] 2xl:text-xs font-semibold text-teal-300 uppercase tracking-wider">
               Vacation Sinking Fund
             </span>
-            <Sparkles className="w-4 h-4 text-teal-400" />
+            <Sparkles className="w-4 h-4 2xl:w-5 2xl:h-5 text-teal-400" />
           </div>
-          <div className="text-2xl font-bold font-mono text-teal-200 mb-1">
+          <div className="text-2xl 2xl:text-3xl font-bold font-mono text-teal-200 mb-1">
             {formatCurrency(vacationFund?.currentBalance || 0)}
           </div>
-          <p className="text-[11px] text-teal-300/80">
+          <p className="text-[11px] 2xl:text-xs text-teal-300/80 font-mono">
             Target: {formatCurrency(vacationFund?.targetBalance || 0)} • +{formatCurrency(vacationFund?.monthlyContribution || 0)}/mo
           </p>
         </div>
 
         {/* Out-of-Pocket Total to Reimburse */}
-        <div className="p-5 rounded-2xl bg-white/5 border border-white/10 backdrop-blur-md relative overflow-hidden">
+        <div className="p-5 2xl:p-6 rounded-2xl bg-white/5 border border-white/10 backdrop-blur-md relative overflow-hidden">
           <div className="flex justify-between items-start mb-2">
-            <span className="text-[11px] font-semibold text-amber-300 uppercase tracking-wider">
+            <span className="text-[11px] 2xl:text-xs font-semibold text-amber-300 uppercase tracking-wider">
               Pending Reimbursement
             </span>
-            <Clock className="w-4 h-4 text-amber-400" />
+            <Clock className="w-4 h-4 2xl:w-5 2xl:h-5 text-amber-400" />
           </div>
-          <div className="text-2xl font-bold font-mono text-amber-300 mb-1">
+          <div className="text-2xl 2xl:text-3xl font-bold font-mono text-amber-300 mb-1">
             {formatCurrency(trackingInfo.outOfPocketTotal)}
           </div>
-          <p className="text-[11px] text-slate-400">
+          <p className="text-[11px] 2xl:text-xs text-slate-400">
             Carded out-of-pocket, ready to draw from Sinking Fund
           </p>
         </div>
       </div>
 
       {/* Sinking Fund Payout / Reimbursement Action Bar */}
-      <div className="p-5 rounded-2xl bg-gradient-to-r from-teal-900/30 to-indigo-900/30 border border-teal-500/30 backdrop-blur-md flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+      <div className="p-5 2xl:p-6 rounded-2xl bg-gradient-to-r from-teal-900/30 to-indigo-900/30 border border-teal-500/30 backdrop-blur-md flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
         <div className="space-y-1">
-          <h3 className="text-sm font-bold text-white flex items-center gap-2">
-            <Wallet className="w-4 h-4 text-teal-400" />
+          <h3 className="text-sm 2xl:text-base font-bold text-white flex items-center gap-2">
+            <Wallet className="w-4 h-4 2xl:w-5 2xl:h-5 text-teal-400" />
             Sinking Fund Reimbursement Engine
           </h3>
-          <p className="text-xs text-slate-300">
+          <p className="text-xs 2xl:text-sm text-slate-300">
             {outOfPocketExpenses.length > 0 ? (
               <span>
                 You have <strong>{outOfPocketExpenses.length} out-of-pocket expense(s)</strong> totaling{' '}
@@ -710,9 +710,9 @@ export function TripSettlementModule({ state, onUpdateState }: TripSettlementMod
                 setSelectedExpenseIds(outOfPocketExpenses.map((e) => e.id));
                 setShowSinkingFundReimburseModal(true);
               }}
-              className="flex items-center space-x-2 px-4 py-2.5 bg-gradient-to-r from-teal-500 to-emerald-500 hover:from-teal-400 hover:to-emerald-400 text-slate-950 font-bold text-xs rounded-xl shadow-lg shadow-teal-500/20 transition-all"
+              className="flex items-center space-x-2 px-4 2xl:px-5 py-2.5 2xl:py-3 bg-gradient-to-r from-teal-500 to-emerald-500 hover:from-teal-400 hover:to-emerald-400 text-slate-950 font-bold text-xs 2xl:text-sm rounded-xl shadow-lg shadow-teal-500/20 transition-all"
             >
-              <CheckCircle2 className="w-4 h-4" />
+              <CheckCircle2 className="w-4 h-4 2xl:w-5 2xl:h-5" />
               <span>Reimburse from Sinking Fund</span>
             </button>
           )}
@@ -723,31 +723,31 @@ export function TripSettlementModule({ state, onUpdateState }: TripSettlementMod
               setExpFundedByFund(true);
               setShowAddExpenseModal(true);
             }}
-            className="flex items-center space-x-1.5 px-3.5 py-2.5 bg-white/10 hover:bg-white/15 text-white font-semibold text-xs rounded-xl border border-white/10 transition-all"
+            className="flex items-center space-x-1.5 px-3.5 2xl:px-4 py-2.5 2xl:py-3 bg-white/10 hover:bg-white/15 text-white font-semibold text-xs 2xl:text-sm rounded-xl border border-white/10 transition-all"
           >
-            <Plus className="w-3.5 h-3.5" />
+            <Plus className="w-3.5 h-3.5 2xl:w-4 2xl:h-4" />
             <span>Pay Direct from Fund</span>
           </button>
         </div>
       </div>
 
       {/* Main Content Layout: Expenses Table & Analytics */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+      <div className="grid grid-cols-1 xl:grid-cols-3 2xl:grid-cols-3 gap-6 2xl:gap-8">
         {/* Expenses List Table */}
-        <div className="lg:col-span-2 space-y-4">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-white/5 border border-white/10 p-4 rounded-2xl backdrop-blur-md">
+        <div className="xl:col-span-2 space-y-4">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-white/5 border border-white/10 p-4 2xl:p-5 rounded-2xl backdrop-blur-md">
             <div className="flex items-center space-x-2">
-              <span className="text-sm font-bold text-white">Trip Expenses</span>
-              <span className="text-xs font-mono font-semibold bg-white/10 text-slate-300 px-2 py-0.5 rounded-full">
+              <span className="text-sm 2xl:text-base font-bold text-white">Trip Expenses</span>
+              <span className="text-xs 2xl:text-sm font-mono font-semibold bg-white/10 text-slate-300 px-2.5 py-0.5 rounded-full">
                 {filteredExpenses.length} of {tripExpensesList.length}
               </span>
             </div>
 
             {/* Filter Pills */}
-            <div className="flex items-center space-x-1 bg-black/30 p-1 rounded-xl border border-white/10 text-xs">
+            <div className="flex items-center space-x-1 bg-black/30 p-1 rounded-xl border border-white/10 text-xs 2xl:text-sm">
               <button
                 onClick={() => setExpenseFilter('all')}
-                className={`px-2.5 py-1 rounded-lg font-medium transition-all ${
+                className={`px-2.5 2xl:px-3 py-1 2xl:py-1.5 rounded-lg font-medium transition-all ${
                   expenseFilter === 'all'
                     ? 'bg-teal-500 text-slate-950 font-bold'
                     : 'text-slate-400 hover:text-white'
@@ -757,7 +757,7 @@ export function TripSettlementModule({ state, onUpdateState }: TripSettlementMod
               </button>
               <button
                 onClick={() => setExpenseFilter('sinking_fund')}
-                className={`px-2.5 py-1 rounded-lg font-medium transition-all ${
+                className={`px-2.5 2xl:px-3 py-1 2xl:py-1.5 rounded-lg font-medium transition-all ${
                   expenseFilter === 'sinking_fund'
                     ? 'bg-teal-500 text-slate-950 font-bold'
                     : 'text-slate-400 hover:text-white'
@@ -767,7 +767,7 @@ export function TripSettlementModule({ state, onUpdateState }: TripSettlementMod
               </button>
               <button
                 onClick={() => setExpenseFilter('out_of_pocket')}
-                className={`px-2.5 py-1 rounded-lg font-medium transition-all ${
+                className={`px-2.5 2xl:px-3 py-1 2xl:py-1.5 rounded-lg font-medium transition-all ${
                   expenseFilter === 'out_of_pocket'
                     ? 'bg-teal-500 text-slate-950 font-bold'
                     : 'text-slate-400 hover:text-white'
@@ -783,9 +783,9 @@ export function TripSettlementModule({ state, onUpdateState }: TripSettlementMod
                 setExpFundedByFund(false);
                 setShowAddExpenseModal(true);
               }}
-              className="flex items-center space-x-1 px-3 py-1.5 bg-teal-500/20 hover:bg-teal-500/30 text-teal-300 font-semibold text-xs rounded-xl border border-teal-500/30 transition-all"
+              className="flex items-center space-x-1 px-3 2xl:px-4 py-1.5 2xl:py-2 bg-teal-500/20 hover:bg-teal-500/30 text-teal-300 font-semibold text-xs 2xl:text-sm rounded-xl border border-teal-500/30 transition-all"
             >
-              <Plus className="w-3.5 h-3.5" />
+              <Plus className="w-3.5 h-3.5 2xl:w-4 2xl:h-4" />
               <span>Add Expense</span>
             </button>
           </div>
@@ -793,22 +793,22 @@ export function TripSettlementModule({ state, onUpdateState }: TripSettlementMod
           {/* Table */}
           <div className="bg-white/5 border border-white/10 rounded-2xl backdrop-blur-md overflow-hidden">
             <div className="overflow-x-auto">
-              <table className="w-full text-left text-xs text-slate-300">
-                <thead className="bg-black/30 text-[10px] font-semibold text-slate-400 uppercase tracking-wider border-b border-white/10">
+              <table className="w-full text-left text-xs 2xl:text-sm text-slate-300">
+                <thead className="bg-black/30 text-[10px] 2xl:text-xs font-semibold text-slate-400 uppercase tracking-wider border-b border-white/10">
                   <tr>
-                    <th className="py-3 px-4">Date</th>
-                    <th className="py-3 px-4">Description</th>
-                    <th className="py-3 px-4">Category</th>
-                    <th className="py-3 px-4">Paid By</th>
-                    <th className="py-3 px-4">Sinking Fund Status</th>
-                    <th className="py-3 px-4 text-right">Amount</th>
-                    <th className="py-3 px-4 text-center">Actions</th>
+                    <th className="py-3 2xl:py-3.5 px-4 2xl:px-5">Date</th>
+                    <th className="py-3 2xl:py-3.5 px-4 2xl:px-5">Description</th>
+                    <th className="py-3 2xl:py-3.5 px-4 2xl:px-5">Category</th>
+                    <th className="py-3 2xl:py-3.5 px-4 2xl:px-5">Paid By</th>
+                    <th className="py-3 2xl:py-3.5 px-4 2xl:px-5">Sinking Fund Status</th>
+                    <th className="py-3 2xl:py-3.5 px-4 2xl:px-5 text-right">Amount</th>
+                    <th className="py-3 2xl:py-3.5 px-4 2xl:px-5 text-center">Actions</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-white/5">
                   {filteredExpenses.length === 0 ? (
                     <tr>
-                      <td colSpan={7} className="text-center py-10 text-slate-400">
+                      <td colSpan={7} className="text-center py-10 2xl:py-12 text-slate-400">
                         No expenses match the current filter.
                       </td>
                     </tr>
@@ -818,20 +818,20 @@ export function TripSettlementModule({ state, onUpdateState }: TripSettlementMod
 
                       return (
                         <tr key={exp.id} className="hover:bg-white/5 transition-colors">
-                          <td className="py-3 px-4 font-mono text-slate-400 whitespace-nowrap">
+                          <td className="py-3 2xl:py-3.5 px-4 2xl:px-5 font-mono text-slate-400 whitespace-nowrap">
                             {exp.date}
                           </td>
-                          <td className="py-3 px-4">
+                          <td className="py-3 2xl:py-3.5 px-4 2xl:px-5">
                             <div className="font-semibold text-white">{exp.description}</div>
                             {exp.notes && (
-                              <div className="text-[10px] text-slate-400 truncate max-w-xs">
+                              <div className="text-[10px] 2xl:text-xs text-slate-400 truncate max-w-xs">
                                 {exp.notes}
                               </div>
                             )}
                           </td>
-                          <td className="py-3 px-4 whitespace-nowrap">
+                          <td className="py-3 2xl:py-3.5 px-4 2xl:px-5 whitespace-nowrap">
                             <span
-                              className="px-2 py-0.5 rounded-full text-[10px] font-semibold uppercase tracking-wider"
+                              className="px-2 2xl:px-2.5 py-0.5 rounded-full text-[10px] 2xl:text-xs font-semibold uppercase tracking-wider"
                               style={{
                                 backgroundColor: `${TRIP_CAT_COLORS[exp.category]}20`,
                                 color: TRIP_CAT_COLORS[exp.category],
@@ -841,7 +841,7 @@ export function TripSettlementModule({ state, onUpdateState }: TripSettlementMod
                               {exp.category}
                             </span>
                           </td>
-                          <td className="py-3 px-4 whitespace-nowrap">
+                          <td className="py-3 2xl:py-3.5 px-4 2xl:px-5 whitespace-nowrap">
                             {exp.paidBy === 'bunny' && (
                               <span className="flex items-center gap-1.5 text-rose-300 font-medium">
                                 <span>🐰</span> Bunny
@@ -863,11 +863,11 @@ export function TripSettlementModule({ state, onUpdateState }: TripSettlementMod
                               </span>
                             )}
                           </td>
-                          <td className="py-3 px-4 whitespace-nowrap">
+                          <td className="py-3 2xl:py-3.5 px-4 2xl:px-5 whitespace-nowrap">
                             <button
                               onClick={() => handleToggleSinkingFundCoverage(exp.id)}
                               title="Click to toggle Sinking Fund funding"
-                              className={`flex items-center space-x-1.5 px-2.5 py-1 rounded-full text-[10px] font-semibold transition-all ${
+                              className={`flex items-center space-x-1.5 px-2.5 2xl:px-3 py-1 rounded-full text-[10px] 2xl:text-xs font-semibold transition-all ${
                                 isFunded
                                   ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 hover:bg-emerald-500/30'
                                   : 'bg-amber-500/10 text-amber-300 border border-amber-500/30 hover:bg-amber-500/20'
@@ -875,27 +875,27 @@ export function TripSettlementModule({ state, onUpdateState }: TripSettlementMod
                             >
                               {isFunded ? (
                                 <>
-                                  <Check className="w-3 h-3 text-emerald-400" />
+                                  <Check className="w-3 h-3 2xl:w-3.5 2xl:h-3.5 text-emerald-400" />
                                   <span>Covered by Fund</span>
                                 </>
                               ) : (
                                 <>
-                                  <Clock className="w-3 h-3 text-amber-400" />
+                                  <Clock className="w-3 h-3 2xl:w-3.5 2xl:h-3.5 text-amber-400" />
                                   <span>Out-of-Pocket</span>
                                 </>
                               )}
                             </button>
                           </td>
-                          <td className="py-3 px-4 font-mono font-bold text-white text-right whitespace-nowrap">
+                          <td className="py-3 2xl:py-3.5 px-4 2xl:px-5 font-mono font-bold text-white text-right whitespace-nowrap">
                             {formatCurrencyExact(exp.totalCost)}
                           </td>
-                          <td className="py-3 px-4 text-center whitespace-nowrap">
+                          <td className="py-3 2xl:py-3.5 px-4 2xl:px-5 text-center whitespace-nowrap">
                             <button
                               onClick={() => handleDeleteExpense(exp.id)}
                               className="p-1 text-slate-500 hover:text-rose-400 transition-colors"
                               title="Delete expense"
                             >
-                              <Trash2 className="w-3.5 h-3.5" />
+                              <Trash2 className="w-3.5 h-3.5 2xl:w-4 2xl:h-4" />
                             </button>
                           </td>
                         </tr>
@@ -911,10 +911,10 @@ export function TripSettlementModule({ state, onUpdateState }: TripSettlementMod
         {/* Right Side: Charts & Breakdown */}
         <div className="space-y-6">
           {/* Category Breakdown Donut */}
-          <div className="p-5 bg-white/5 border border-white/10 rounded-2xl backdrop-blur-md space-y-4">
-            <h3 className="text-sm font-bold text-white flex items-center justify-between">
+          <div className="p-5 2xl:p-6 bg-white/5 border border-white/10 rounded-2xl backdrop-blur-md space-y-4">
+            <h3 className="text-sm 2xl:text-base font-bold text-white flex items-center justify-between">
               <span>Category Breakdown</span>
-              <span className="text-xs text-slate-400 font-mono">
+              <span className="text-xs 2xl:text-sm text-slate-400 font-mono">
                 {donutItems.length} Categories
               </span>
             </h3>
@@ -926,17 +926,17 @@ export function TripSettlementModule({ state, onUpdateState }: TripSettlementMod
                 currency="CAD"
               />
             ) : (
-              <div className="py-8 text-center text-xs text-slate-400">
+              <div className="py-8 text-center text-xs 2xl:text-sm text-slate-400">
                 No categorized spend logged yet.
               </div>
             )}
           </div>
 
           {/* Funding Source Breakdown */}
-          <div className="p-5 bg-white/5 border border-white/10 rounded-2xl backdrop-blur-md space-y-3">
-            <h3 className="text-sm font-bold text-white">Funding &amp; Card Allocation</h3>
-            <div className="space-y-2 text-xs">
-              <div className="flex justify-between items-center p-2.5 rounded-xl bg-emerald-500/10 border border-emerald-500/20">
+          <div className="p-5 2xl:p-6 bg-white/5 border border-white/10 rounded-2xl backdrop-blur-md space-y-3">
+            <h3 className="text-sm 2xl:text-base font-bold text-white">Funding &amp; Card Allocation</h3>
+            <div className="space-y-2 text-xs 2xl:text-sm">
+              <div className="flex justify-between items-center p-2.5 2xl:p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/20">
                 <span className="flex items-center gap-1.5 text-emerald-300 font-semibold">
                   <span>🏦</span> Sinking Fund Covered
                 </span>
@@ -945,7 +945,7 @@ export function TripSettlementModule({ state, onUpdateState }: TripSettlementMod
                 </span>
               </div>
 
-              <div className="flex justify-between items-center p-2.5 rounded-xl bg-white/5 border border-white/10">
+              <div className="flex justify-between items-center p-2.5 2xl:p-3 rounded-xl bg-white/5 border border-white/10">
                 <span className="flex items-center gap-1.5 text-rose-300 font-semibold">
                   <span>🐰</span> Carded by Bunny
                 </span>
@@ -954,7 +954,7 @@ export function TripSettlementModule({ state, onUpdateState }: TripSettlementMod
                 </span>
               </div>
 
-              <div className="flex justify-between items-center p-2.5 rounded-xl bg-white/5 border border-white/10">
+              <div className="flex justify-between items-center p-2.5 2xl:p-3 rounded-xl bg-white/5 border border-white/10">
                 <span className="flex items-center gap-1.5 text-teal-300 font-semibold">
                   <span>🐵</span> Carded by Monkey
                 </span>
@@ -963,7 +963,7 @@ export function TripSettlementModule({ state, onUpdateState }: TripSettlementMod
                 </span>
               </div>
 
-              <div className="flex justify-between items-center p-2.5 rounded-xl bg-white/5 border border-white/10">
+              <div className="flex justify-between items-center p-2.5 2xl:p-3 rounded-xl bg-white/5 border border-white/10">
                 <span className="flex items-center gap-1.5 text-indigo-300 font-semibold">
                   <span>🤝</span> Joint Card / Account
                 </span>
@@ -972,7 +972,7 @@ export function TripSettlementModule({ state, onUpdateState }: TripSettlementMod
                 </span>
               </div>
             </div>
-            <p className="text-[11px] text-slate-400 italic">
+            <p className="text-[11px] 2xl:text-xs text-slate-400 italic">
               * Remember: Carded amounts are logged for tracking and can be drawn anytime from the Vacation Sinking Fund.
             </p>
           </div>

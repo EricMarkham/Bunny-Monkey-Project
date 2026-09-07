@@ -142,7 +142,7 @@ export default function App() {
       />
 
       {/* Main Content Area */}
-      <main className="relative z-10 flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 pt-6 sm:pt-8">
+      <main className="relative z-10 flex-1 max-w-[2000px] w-full mx-auto px-4 sm:px-6 lg:px-8 2xl:px-12 pt-6 sm:pt-8 2xl:pt-10">
         {activeTab === 'budget' && (
           <BudgetModule
             state={state}
@@ -177,21 +177,21 @@ export default function App() {
       </main>
 
       {/* Frosted Glass Footer */}
-      <footer className="relative z-10 border-t border-white/10 py-5 text-center text-xs text-slate-400 bg-white/5 backdrop-blur-md mt-auto">
-        <div className="max-w-7xl mx-auto px-4 flex flex-col sm:flex-row items-center justify-between gap-3">
+      <footer className="relative z-10 border-t border-white/10 py-5 2xl:py-6 text-center text-xs 2xl:text-sm text-slate-400 bg-white/5 backdrop-blur-md mt-auto">
+        <div className="max-w-[2000px] w-full mx-auto px-4 sm:px-6 lg:px-8 2xl:px-12 flex flex-col sm:flex-row items-center justify-between gap-3">
           <div className="flex items-center space-x-2">
-            <span className="font-semibold text-slate-200">🐰 Bunny &amp; 🐵 Monkey Co-Op</span>
+            <span className="font-semibold text-slate-200 2xl:text-base">🐰 Bunny &amp; 🐵 Monkey Co-Op</span>
             <span className="text-white/20">•</span>
             <button
               onClick={() => setShowStorageModal(true)}
-              className="flex items-center gap-1.5 text-[10px] uppercase tracking-wider text-emerald-400 hover:text-emerald-300 font-semibold transition-colors"
+              className="flex items-center gap-1.5 text-[10px] 2xl:text-xs uppercase tracking-wider text-emerald-400 hover:text-emerald-300 font-semibold transition-colors"
               title="Click to view data persistence vault & backups"
             >
               <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.8)] animate-pulse" />
               IndexedDB &amp; Local Storage Active (Reboot-Safe)
             </button>
           </div>
-          <div className="flex items-center gap-2 text-[11px] text-slate-400">
+          <div className="flex items-center gap-2 text-[11px] 2xl:text-xs text-slate-400">
             <button
               onClick={() => setShowStorageModal(true)}
               className="px-2 py-0.5 rounded-md bg-emerald-500/10 border border-emerald-500/30 text-emerald-300 hover:bg-emerald-500/20 transition-colors"

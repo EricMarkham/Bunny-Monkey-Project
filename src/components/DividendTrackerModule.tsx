@@ -13,6 +13,11 @@ import {
   RefreshCw,
   Clock,
   ArrowUpRight,
+  Search,
+  Sparkles,
+  Loader2,
+  AlertCircle,
+  ExternalLink,
 } from 'lucide-react';
 import {
   AccountType,
@@ -68,6 +73,104 @@ export function DividendTrackerModule({ state, onUpdateState }: DividendTrackerM
   const [newFreq, setNewFreq] = useState<PayoutFrequency>('Quarterly');
   const [newSector, setNewSector] = useState('Broad Market');
   const [newDripEnabled, setNewDripEnabled] = useState(true);
+  const [newExDate, setNewExDate] = useState('');
+  const [newPayDate, setNewPayDate] = useState('');
+  const [newPayoutMonths, setNewPayoutMonths] = useState<number[]>([3, 6, 9, 12]);
+
+  // Quote lookup state
+  const [isFetchingQuote, setIsFetchingQuote] = useState(false);
+  const [quoteFetchError, setQuoteFetchError] = useState<string | null>(null);
+  const [quoteFetchSuccess, setQuoteFetchSuccess] = useState<string | null>(null);
+  const [fetchedYield, setFetchedYield] = useState<number | null>(null);
+
+  // Popular ticker presets for fast 1-click lookup
+  const QUICK_TICKERS = [
+    { symbol: 'VDY.TO', label: 'VDY (TSX High Div)', flag: '🇨🇦' },
+    { symbol: 'SCHD', label: 'SCHD (US Div Equity)', flag: '🇺🇸' },
+    { symbol: 'ENB.TO', label: 'Enbridge (TSX)', flag: '🇨🇦' },
+    { symbol: 'AAPL', label: 'Apple (US Tech)', flag: '🇺🇸' },
+    { symbol: 'XEI.TO', label: 'XEI (iShares TSX)', flag: '🇨🇦' },
+  ];
+
+  const handleFetchQuote = async (symbolOverride?: string) => {
+    const targetSymbol = (symbolOverride || newSymbol).trim().toUpperCase();
+    if (!targetSymbol) {
+      setQuoteFetchError('Please enter a stock or ETF ticker symbol (e.g., VDY.TO, SCHD, ENB.TO).');
+      return;
+    }
+
+    setIsFetchingQuote(true);
+    setQuoteFetchError(null);
+    setQuoteFetchSuccess(null);
+    setNewSymbol(targetSymbol);
+
+    try {
+      const res = await fetch(`/api/stock-quote?symbol=${encodeURIComponent(targetSymbol)}`);
+      const data = await res.json();
+
+      if (!res.ok) {
+        throw new Error(data.error || `Unable to locate market data for '${targetSymbol}'`);
+      }
+
+      setNewName(data.name || targetSymbol);
+      setNewCurrency(data.currency || 'CAD');
+      setNewCurrentPrice(data.currentPrice ? data.currentPrice.toString() : '');
+      if (!newAvgCost) {
+        setNewAvgCost(data.currentPrice ? data.currentPrice.toString() : '');
+      }
+      setNewAnnualDiv(data.divPerShare ? data.divPerShare.toString() : '0');
+      setNewFreq(data.frequency || 'Quarterly');
+      if (data.nextExDate) {
+        setNewExDate(data.nextExDate);
+        try {
+          const exD = new Date(data.nextExDate);
+          exD.setDate(exD.getDate() + 15);
+          setNewPayDate(exD.toISOString().split('T')[0]);
+        } catch {
+          setNewPayDate(data.nextExDate);
+        }
+      }
+      if (Array.isArray(data.payoutMonths) && data.payoutMonths.length > 0) {
+        setNewPayoutMonths(data.payoutMonths);
+      }
+      setFetchedYield(data.yieldPercent !== undefined ? data.yieldPercent : null);
+
+      // Auto-suggest sector based on name/symbol
+      const lowerName = (data.name || '').toLowerCase();
+      if (lowerName.includes('dividend') || lowerName.includes('high yield')) {
+        setNewSector('High Dividend Yield ETF');
+      } else if (
+        lowerName.includes('bank') ||
+        targetSymbol.startsWith('RY') ||
+        targetSymbol.startsWith('TD') ||
+        targetSymbol.startsWith('BNS')
+      ) {
+        setNewSector('Canadian Financials');
+      } else if (
+        lowerName.includes('pipeline') ||
+        lowerName.includes('energy') ||
+        targetSymbol.startsWith('ENB') ||
+        targetSymbol.startsWith('TRP')
+      ) {
+        setNewSector('Energy & Infrastructure');
+      } else if (lowerName.includes('apple') || targetSymbol === 'AAPL' || targetSymbol === 'MSFT') {
+        setNewSector('Technology');
+      } else {
+        setNewSector('Broad Market Equity');
+      }
+
+      setQuoteFetchSuccess(
+        `✓ Found ${data.name}: $${data.currentPrice} ${data.currency} • Annual Div: $${data.divPerShare}/sh (${data.yieldPercent}% Yield) • ${data.frequency}`
+      );
+    } catch (err: any) {
+      setQuoteFetchError(
+        err.message ||
+          `Could not find ticker '${targetSymbol}'. For Canadian stocks, append '.TO' (e.g. VDY.TO, ENB.TO). For US stocks, use standard tickers (e.g. SCHD, AAPL).`
+      );
+    } finally {
+      setIsFetchingQuote(false);
+    }
+  };
 
   // Filtered holdings
   const filteredHoldings = state.holdings.filter((h) => {
@@ -101,11 +204,16 @@ export function DividendTrackerModule({ state, onUpdateState }: DividendTrackerM
 
     if (!newSymbol.trim() || isNaN(shares) || shares <= 0 || isNaN(price) || price <= 0) return;
 
-    // Default payout months
-    let payoutMonths = [3, 6, 9, 12];
-    if (newFreq === 'Monthly') payoutMonths = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
-    else if (newFreq === 'Semi-Annual') payoutMonths = [6, 12];
-    else if (newFreq === 'Annual') payoutMonths = [12];
+    // Default payout months if not set
+    let payoutMonths = newPayoutMonths;
+    if (!payoutMonths || payoutMonths.length === 0) {
+      if (newFreq === 'Monthly') payoutMonths = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
+      else if (newFreq === 'Semi-Annual') payoutMonths = [6, 12];
+      else if (newFreq === 'Annual') payoutMonths = [12];
+      else payoutMonths = [3, 6, 9, 12];
+    }
+
+    const todayStr = new Date().toISOString().split('T')[0];
 
     const newHolding: DividendHolding = {
       id: `h-${Date.now()}`,
@@ -120,8 +228,8 @@ export function DividendTrackerModule({ state, onUpdateState }: DividendTrackerM
       annualDividendPerShare: divPerShare,
       payoutFrequency: newFreq,
       payoutMonths,
-      nextExDividendDate: new Date().toISOString().split('T')[0],
-      nextPayDate: new Date().toISOString().split('T')[0],
+      nextExDividendDate: newExDate || todayStr,
+      nextPayDate: newPayDate || todayStr,
       sector: newSector,
       dripEnabled: newDripEnabled,
     };
@@ -131,12 +239,18 @@ export function DividendTrackerModule({ state, onUpdateState }: DividendTrackerM
       holdings: [newHolding, ...prev.holdings],
     }));
 
+    // Reset form
     setNewSymbol('');
     setNewName('');
     setNewShares('');
     setNewAvgCost('');
     setNewCurrentPrice('');
     setNewAnnualDiv('');
+    setNewExDate('');
+    setNewPayDate('');
+    setQuoteFetchSuccess(null);
+    setQuoteFetchError(null);
+    setFetchedYield(null);
     setShowAddHoldingModal(false);
   };
 
@@ -162,19 +276,19 @@ export function DividendTrackerModule({ state, onUpdateState }: DividendTrackerM
   return (
     <div className="space-y-8 pb-16">
       {/* Portfolio Dividend KPI Master Cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 2xl:gap-6">
         {/* Total Market Value */}
-        <div className="bg-white/5 backdrop-blur-lg rounded-2xl p-5 border border-white/10 shadow-xl shadow-black/10">
-          <div className="flex items-center justify-between text-xs text-slate-400 mb-1">
-            <span className="font-semibold uppercase tracking-wider text-[10px]">Portfolio Market Value</span>
-            <span className="text-[11px] font-bold text-emerald-300 bg-emerald-500/20 border border-emerald-500/30 px-2 py-0.5 rounded-full">
+        <div className="bg-white/5 backdrop-blur-lg rounded-2xl p-5 2xl:p-6 border border-white/10 shadow-xl shadow-black/10">
+          <div className="flex items-center justify-between text-xs 2xl:text-sm text-slate-400 mb-1">
+            <span className="font-semibold uppercase tracking-wider text-[10px] 2xl:text-xs">Portfolio Market Value</span>
+            <span className="text-[11px] 2xl:text-xs font-bold text-emerald-300 bg-emerald-500/20 border border-emerald-500/30 px-2 py-0.5 rounded-full">
               +{formatPercent(metrics.totalGainPercent, 1)} Gain
             </span>
           </div>
-          <div className="text-2xl font-black font-mono text-white mt-1">
+          <div className="text-2xl 2xl:text-3xl font-black font-mono text-white mt-1">
             {formatCurrency(metrics.totalMarketValueCAD)}
           </div>
-          <div className="text-[11px] text-slate-400 mt-2 flex justify-between">
+          <div className="text-[11px] 2xl:text-xs text-slate-400 mt-2 flex justify-between">
             <span>Cost Basis: {formatCurrency(metrics.totalCostBasisCAD)}</span>
             <span className="font-semibold text-emerald-400">
               +{formatCurrency(metrics.totalGainCAD)}
@@ -183,18 +297,18 @@ export function DividendTrackerModule({ state, onUpdateState }: DividendTrackerM
         </div>
 
         {/* Projected Annual Dividend Income (PADI) */}
-        <div className="bg-white/5 backdrop-blur-lg rounded-2xl p-5 border border-white/10 shadow-xl shadow-black/10">
-          <div className="flex items-center justify-between text-xs text-slate-400 mb-1">
-            <span className="font-semibold uppercase tracking-wider text-[10px]">Projected Annual Income</span>
-            <span className="text-violet-300 font-bold bg-violet-500/20 border border-violet-500/30 px-2 py-0.5 rounded-full text-[10px]">
+        <div className="bg-white/5 backdrop-blur-lg rounded-2xl p-5 2xl:p-6 border border-white/10 shadow-xl shadow-black/10">
+          <div className="flex items-center justify-between text-xs 2xl:text-sm text-slate-400 mb-1">
+            <span className="font-semibold uppercase tracking-wider text-[10px] 2xl:text-xs">Projected Annual Income</span>
+            <span className="text-violet-300 font-bold bg-violet-500/20 border border-violet-500/30 px-2 py-0.5 rounded-full text-[10px] 2xl:text-xs">
               PADI (CAD)
             </span>
           </div>
-          <div className="text-2xl font-black font-mono text-violet-400 mt-1">
+          <div className="text-2xl 2xl:text-3xl font-black font-mono text-violet-400 mt-1">
             {formatCurrency(metrics.totalPadiCAD)}
-            <span className="text-xs font-normal text-slate-400">/yr</span>
+            <span className="text-xs 2xl:text-sm font-normal text-slate-400">/yr</span>
           </div>
-          <div className="text-[11px] text-slate-400 mt-2 flex justify-between">
+          <div className="text-[11px] 2xl:text-xs text-slate-400 mt-2 flex justify-between">
             <span>Monthly Run-Rate:</span>
             <span className="font-bold text-white font-mono">
               ~{formatCurrency(metrics.averageMonthlyPayoutCAD)}/mo
@@ -203,17 +317,17 @@ export function DividendTrackerModule({ state, onUpdateState }: DividendTrackerM
         </div>
 
         {/* Portfolio Yield vs Yield on Cost (YOC) */}
-        <div className="bg-white/5 backdrop-blur-lg rounded-2xl p-5 border border-white/10 shadow-xl shadow-black/10">
-          <div className="flex items-center justify-between text-xs text-slate-400 mb-1">
-            <span className="font-semibold uppercase tracking-wider text-[10px]">Yield on Cost (YOC)</span>
-            <span className="text-sky-300 font-bold bg-sky-500/20 border border-sky-500/30 px-2 py-0.5 rounded-full text-[10px]">
+        <div className="bg-white/5 backdrop-blur-lg rounded-2xl p-5 2xl:p-6 border border-white/10 shadow-xl shadow-black/10">
+          <div className="flex items-center justify-between text-xs 2xl:text-sm text-slate-400 mb-1">
+            <span className="font-semibold uppercase tracking-wider text-[10px] 2xl:text-xs">Yield on Cost (YOC)</span>
+            <span className="text-sky-300 font-bold bg-sky-500/20 border border-sky-500/30 px-2 py-0.5 rounded-full text-[10px] 2xl:text-xs">
               Compound Yield
             </span>
           </div>
-          <div className="text-2xl font-black font-mono text-sky-400 mt-1">
+          <div className="text-2xl 2xl:text-3xl font-black font-mono text-sky-400 mt-1">
             {formatPercent(metrics.yieldOnCostPercent, 2)}
           </div>
-          <div className="text-[11px] text-slate-400 mt-2 flex justify-between">
+          <div className="text-[11px] 2xl:text-xs text-slate-400 mt-2 flex justify-between">
             <span>Current Market Yield:</span>
             <span className="font-semibold font-mono text-slate-200">
               {formatPercent(metrics.portfolioYieldPercent, 2)}
@@ -222,17 +336,17 @@ export function DividendTrackerModule({ state, onUpdateState }: DividendTrackerM
         </div>
 
         {/* DRIP Reinvestment Snowball */}
-        <div className="bg-white/5 backdrop-blur-lg rounded-2xl p-5 border border-white/10 shadow-xl shadow-black/10">
-          <div className="flex items-center justify-between text-xs text-slate-400 mb-1">
-            <span className="font-semibold uppercase tracking-wider text-[10px]">DRIP Snowball Status</span>
-            <span className="text-emerald-300 font-bold bg-emerald-500/20 border border-emerald-500/30 px-2 py-0.5 rounded-full text-[10px]">
+        <div className="bg-white/5 backdrop-blur-lg rounded-2xl p-5 2xl:p-6 border border-white/10 shadow-xl shadow-black/10">
+          <div className="flex items-center justify-between text-xs 2xl:text-sm text-slate-400 mb-1">
+            <span className="font-semibold uppercase tracking-wider text-[10px] 2xl:text-xs">DRIP Snowball Status</span>
+            <span className="text-emerald-300 font-bold bg-emerald-500/20 border border-emerald-500/30 px-2 py-0.5 rounded-full text-[10px] 2xl:text-xs">
               Active
             </span>
           </div>
-          <div className="text-2xl font-black font-mono text-emerald-400 mt-1">
+          <div className="text-2xl 2xl:text-3xl font-black font-mono text-emerald-400 mt-1">
             {formatCurrency(metrics.totalPadiCAD)}
           </div>
-          <div className="text-[11px] text-slate-400 mt-2 flex justify-between">
+          <div className="text-[11px] 2xl:text-xs text-slate-400 mt-2 flex justify-between">
             <span>Annual Free Reinvestment:</span>
             <span className="font-bold text-emerald-400">100% Compounding</span>
           </div>
@@ -240,19 +354,19 @@ export function DividendTrackerModule({ state, onUpdateState }: DividendTrackerM
       </div>
 
       {/* 12-Month Dividend Payout Calendar & Ex-Dividend Schedule */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 2xl:gap-8">
         {/* Interactive 12-Month Bar Visualizer */}
-        <div className="lg:col-span-8 bg-white/5 backdrop-blur-lg rounded-2xl p-6 border border-white/10 shadow-xl shadow-black/10 flex flex-col justify-between">
+        <div className="lg:col-span-8 bg-white/5 backdrop-blur-lg rounded-2xl p-6 2xl:p-8 border border-white/10 shadow-xl shadow-black/10 flex flex-col justify-between">
           <div className="flex items-center justify-between mb-4">
             <div>
-              <h3 className="text-base font-bold text-white">
+              <h3 className="text-base 2xl:text-xl font-bold text-white">
                 12-Month Dividend Payout Calendar
               </h3>
-              <p className="text-xs text-slate-400">
+              <p className="text-xs 2xl:text-sm text-slate-400">
                 Monthly projected cash flow distributions from Canadian &amp; US equity holdings
               </p>
             </div>
-            <div className="text-xs text-right font-mono font-bold text-rose-300 bg-rose-500/20 border border-rose-500/30 px-2.5 py-1 rounded-xl">
+            <div className="text-xs 2xl:text-sm text-right font-mono font-bold text-rose-300 bg-rose-500/20 border border-rose-500/30 px-2.5 py-1 2xl:px-3.5 2xl:py-1.5 rounded-xl">
               Current Month: Sep 2026
             </div>
           </div>
@@ -261,22 +375,22 @@ export function DividendTrackerModule({ state, onUpdateState }: DividendTrackerM
             <MonthlyDividendBarChart payouts={metrics.monthlyPayoutsCAD} currentMonthIndex={8} />
           </div>
 
-          <div className="grid grid-cols-3 gap-2 pt-4 border-t border-white/10 text-center text-xs">
-            <div className="p-2.5 rounded-xl bg-white/5 border border-white/10">
-              <span className="text-[10px] text-slate-400">Lowest Month</span>
-              <div className="font-mono font-bold text-slate-200">
+          <div className="grid grid-cols-3 gap-2 2xl:gap-4 pt-4 border-t border-white/10 text-center text-xs 2xl:text-sm">
+            <div className="p-2.5 2xl:p-3.5 rounded-xl bg-white/5 border border-white/10">
+              <span className="text-[10px] 2xl:text-xs text-slate-400">Lowest Month</span>
+              <div className="font-mono font-bold text-slate-200 text-xs 2xl:text-base">
                 {formatCurrency(Math.min(...metrics.monthlyPayoutsCAD.filter((x) => x > 0)))}
               </div>
             </div>
-            <div className="p-2.5 rounded-xl bg-white/5 border border-white/10">
-              <span className="text-[10px] text-slate-400">Average Month</span>
-              <div className="font-mono font-bold text-slate-200">
+            <div className="p-2.5 2xl:p-3.5 rounded-xl bg-white/5 border border-white/10">
+              <span className="text-[10px] 2xl:text-xs text-slate-400">Average Month</span>
+              <div className="font-mono font-bold text-slate-200 text-xs 2xl:text-base">
                 {formatCurrency(metrics.averageMonthlyPayoutCAD)}
               </div>
             </div>
-            <div className="p-2.5 rounded-xl bg-white/5 border border-white/10">
-              <span className="text-[10px] text-slate-400">Peak Month</span>
-              <div className="font-mono font-bold text-emerald-400">
+            <div className="p-2.5 2xl:p-3.5 rounded-xl bg-white/5 border border-white/10">
+              <span className="text-[10px] 2xl:text-xs text-slate-400">Peak Month</span>
+              <div className="font-mono font-bold text-emerald-400 text-xs 2xl:text-base">
                 {formatCurrency(Math.max(...metrics.monthlyPayoutsCAD))}
               </div>
             </div>
@@ -284,19 +398,19 @@ export function DividendTrackerModule({ state, onUpdateState }: DividendTrackerM
         </div>
 
         {/* Upcoming Ex-Dividend Schedule & Account Allocation */}
-        <div className="lg:col-span-4 bg-white/5 backdrop-blur-lg rounded-2xl p-6 border border-white/10 shadow-xl shadow-black/10 flex flex-col justify-between">
+        <div className="lg:col-span-4 bg-white/5 backdrop-blur-lg rounded-2xl p-6 2xl:p-8 border border-white/10 shadow-xl shadow-black/10 flex flex-col justify-between">
           <div>
             <div className="flex items-center space-x-2 mb-3">
-              <Calendar className="w-4 h-4 text-violet-400" />
-              <h3 className="text-sm font-bold text-white">
+              <Calendar className="w-4 h-4 2xl:w-5 2xl:h-5 text-violet-400" />
+              <h3 className="text-sm 2xl:text-base font-bold text-white">
                 Upcoming Ex-Dividend Dates
               </h3>
             </div>
-            <p className="text-[11px] text-slate-400 mb-3">
+            <p className="text-[11px] 2xl:text-xs text-slate-400 mb-3">
               Must own shares before ex-date to capture upcoming dividend payment.
             </p>
 
-            <div className="space-y-2.5">
+            <div className="space-y-2.5 2xl:space-y-3">
               {upcomingSchedules.map((item) => {
                 const isUsd = item.currency === 'USD';
                 const rate = isUsd ? USD_TO_CAD_RATE : 1;
@@ -305,16 +419,16 @@ export function DividendTrackerModule({ state, onUpdateState }: DividendTrackerM
                 return (
                   <div
                     key={item.id}
-                    className="p-2.5 rounded-xl border border-white/10 bg-white/5 flex items-center justify-between text-xs"
+                    className="p-2.5 2xl:p-3 rounded-xl border border-white/10 bg-white/5 flex items-center justify-between text-xs 2xl:text-sm"
                   >
                     <div>
                       <div className="flex items-center space-x-1.5 font-bold text-white">
                         <span>{item.symbol}</span>
-                        <span className="text-[10px] text-slate-400 font-normal truncate max-w-[90px]">
+                        <span className="text-[10px] 2xl:text-xs text-slate-400 font-normal truncate max-w-[90px] 2xl:max-w-[140px]">
                           {item.name}
                         </span>
                       </div>
-                      <div className="text-[10px] text-slate-400 mt-0.5">
+                      <div className="text-[10px] 2xl:text-xs text-slate-400 mt-0.5">
                         Ex-Date: <strong className="text-slate-300 font-mono">{item.nextExDividendDate}</strong>
                       </div>
                     </div>
@@ -322,7 +436,7 @@ export function DividendTrackerModule({ state, onUpdateState }: DividendTrackerM
                       <div className="font-mono font-bold text-emerald-400">
                         +{formatCurrency(estPayout)}
                       </div>
-                      <div className="text-[10px] text-slate-400">
+                      <div className="text-[10px] 2xl:text-xs text-slate-400">
                         Pay: {item.nextPayDate}
                       </div>
                     </div>
@@ -392,18 +506,18 @@ export function DividendTrackerModule({ state, onUpdateState }: DividendTrackerM
       </div>
 
       {/* Dividend Reinvestment Plan (DRIP) Compound Accumulation Simulator */}
-      <div className="bg-white/5 backdrop-blur-lg rounded-2xl p-6 border border-white/10 shadow-xl shadow-black/10">
+      <div className="bg-white/5 backdrop-blur-lg rounded-2xl p-6 2xl:p-8 border border-white/10 shadow-xl shadow-black/10">
         <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4 mb-6">
           <div>
             <div className="flex items-center space-x-2.5">
-              <span className="p-2.5 rounded-xl bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
-                <Zap className="w-5 h-5" />
+              <span className="p-2.5 2xl:p-3 rounded-xl bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+                <Zap className="w-5 h-5 2xl:w-6 2xl:h-6" />
               </span>
               <div>
-                <h3 className="text-base font-bold text-white">
+                <h3 className="text-base 2xl:text-xl font-bold text-white">
                   DRIP Compound Accumulation Simulator
                 </h3>
-                <p className="text-xs text-slate-400">
+                <p className="text-xs 2xl:text-sm text-slate-400">
                   Model long-term dividend snowball growth with automatic reinvestment &amp; monthly contributions
                 </p>
               </div>
@@ -411,30 +525,30 @@ export function DividendTrackerModule({ state, onUpdateState }: DividendTrackerM
           </div>
 
           {/* Simulator Outcomes Callout */}
-          <div className="flex flex-wrap items-center gap-2.5 text-xs">
-            <div className="p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/20">
-              <span className="text-[10px] text-emerald-300 uppercase font-semibold">
+          <div className="flex flex-wrap items-center gap-2.5 text-xs 2xl:text-sm">
+            <div className="p-3 2xl:p-4 rounded-xl bg-emerald-500/10 border border-emerald-500/20">
+              <span className="text-[10px] 2xl:text-xs text-emerald-300 uppercase font-semibold">
                 Projected Portfolio (Yr {horizonYears})
               </span>
-              <div className="text-base font-black font-mono text-emerald-300">
+              <div className="text-base 2xl:text-xl font-black font-mono text-emerald-300">
                 {formatCurrency(simulation.finalYear.portfolioValueWithDRIP)}
               </div>
             </div>
 
-            <div className="p-3 rounded-xl bg-violet-500/10 border border-violet-500/20">
-              <span className="text-[10px] text-violet-300 uppercase font-semibold">
+            <div className="p-3 2xl:p-4 rounded-xl bg-violet-500/10 border border-violet-500/20">
+              <span className="text-[10px] 2xl:text-xs text-violet-300 uppercase font-semibold">
                 Passive Dividend Cash Flow
               </span>
-              <div className="text-base font-black font-mono text-violet-300">
+              <div className="text-base 2xl:text-xl font-black font-mono text-violet-300">
                 {formatCurrency(simulation.finalYear.annualDividendIncomeWithDRIP)}/yr
               </div>
             </div>
 
-            <div className="p-3 rounded-xl bg-sky-500/10 border border-sky-500/20">
-              <span className="text-[10px] text-sky-300 uppercase font-semibold">
+            <div className="p-3 2xl:p-4 rounded-xl bg-sky-500/10 border border-sky-500/20">
+              <span className="text-[10px] 2xl:text-xs text-sky-300 uppercase font-semibold">
                 DRIP Compounding Advantage
               </span>
-              <div className="text-base font-black font-mono text-sky-300">
+              <div className="text-base 2xl:text-xl font-black font-mono text-sky-300">
                 +{formatCurrency(simulation.dripAdvantageValue)}
               </div>
             </div>
@@ -442,7 +556,7 @@ export function DividendTrackerModule({ state, onUpdateState }: DividendTrackerM
         </div>
 
         {/* Interactive Controls Sliders */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4 p-4 rounded-xl bg-white/5 border border-white/10 mb-6 text-xs backdrop-blur-sm">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4 2xl:gap-6 p-4 2xl:p-5 rounded-xl bg-white/5 border border-white/10 mb-6 text-xs 2xl:text-sm backdrop-blur-sm">
           {/* Horizon */}
           <div>
             <div className="flex justify-between font-medium mb-1 text-slate-300">
@@ -525,7 +639,7 @@ export function DividendTrackerModule({ state, onUpdateState }: DividendTrackerM
             </span>
             <button
               onClick={() => setReinvest(!reinvest)}
-              className={`py-1.5 px-3 rounded-xl font-bold text-xs transition-all flex items-center justify-center space-x-1.5 border ${
+              className={`py-1.5 2xl:py-2 px-3 rounded-xl font-bold text-xs 2xl:text-sm transition-all flex items-center justify-center space-x-1.5 border ${
                 reinvest
                   ? 'bg-emerald-600 hover:bg-emerald-500 border-emerald-400/50 text-white shadow-lg shadow-emerald-600/20'
                   : 'bg-slate-800 text-slate-300 border-white/10'
@@ -544,13 +658,13 @@ export function DividendTrackerModule({ state, onUpdateState }: DividendTrackerM
       </div>
 
       {/* Holdings Management Ledger */}
-      <div className="bg-white/5 backdrop-blur-lg rounded-2xl p-6 border border-white/10 shadow-xl shadow-black/10">
+      <div className="bg-white/5 backdrop-blur-lg rounded-2xl p-6 2xl:p-8 border border-white/10 shadow-xl shadow-black/10">
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-6">
           <div>
-            <h3 className="text-base font-bold text-white">
+            <h3 className="text-base 2xl:text-xl font-bold text-white">
               Equity &amp; Dividend Holdings
             </h3>
-            <p className="text-xs text-slate-400">
+            <p className="text-xs 2xl:text-sm text-slate-400">
               Cross-border positions tracked across TFSA, RRSP, Non-Registered, and RESP accounts
             </p>
           </div>
@@ -560,7 +674,7 @@ export function DividendTrackerModule({ state, onUpdateState }: DividendTrackerM
             <select
               value={selectedAccountFilter}
               onChange={(e) => setSelectedAccountFilter(e.target.value)}
-              className="text-xs font-semibold px-2.5 py-1.5 rounded-xl border border-white/15 bg-slate-900 text-slate-200 focus:outline-hidden"
+              className="text-xs 2xl:text-sm font-semibold px-2.5 py-1.5 2xl:px-3 2xl:py-2 rounded-xl border border-white/15 bg-slate-900 text-slate-200 focus:outline-hidden"
             >
               <option value="all">All Accounts</option>
               <option value="TFSA">TFSA</option>
@@ -573,7 +687,7 @@ export function DividendTrackerModule({ state, onUpdateState }: DividendTrackerM
             <select
               value={selectedOwnerFilter}
               onChange={(e) => setSelectedOwnerFilter(e.target.value)}
-              className="text-xs font-semibold px-2.5 py-1.5 rounded-xl border border-white/15 bg-slate-900 text-slate-200 focus:outline-hidden"
+              className="text-xs 2xl:text-sm font-semibold px-2.5 py-1.5 2xl:px-3 2xl:py-2 rounded-xl border border-white/15 bg-slate-900 text-slate-200 focus:outline-hidden"
             >
               <option value="all">All Owners</option>
               <option value="bunny">🐰 Bunny</option>
@@ -584,7 +698,7 @@ export function DividendTrackerModule({ state, onUpdateState }: DividendTrackerM
 
             <button
               onClick={() => setShowAddHoldingModal(true)}
-              className="flex items-center space-x-1.5 text-xs font-semibold bg-violet-600 hover:bg-violet-500 border border-violet-400/50 text-white px-3.5 py-1.5 rounded-xl transition-all shadow-lg shadow-violet-600/20"
+              className="flex items-center space-x-1.5 text-xs 2xl:text-sm font-semibold bg-violet-600 hover:bg-violet-500 border border-violet-400/50 text-white px-3.5 py-1.5 2xl:px-4 2xl:py-2 rounded-xl transition-all shadow-lg shadow-violet-600/20"
             >
               <Plus className="w-4 h-4" />
               <span>Add Ticker / Holding</span>
@@ -593,22 +707,22 @@ export function DividendTrackerModule({ state, onUpdateState }: DividendTrackerM
         </div>
 
         <div className="overflow-x-auto rounded-xl border border-white/10">
-          <table className="w-full text-left text-xs">
-            <thead className="bg-white/5 text-slate-400 uppercase tracking-wider font-semibold border-b border-white/10 text-[11px]">
+          <table className="w-full text-left text-xs 2xl:text-sm">
+            <thead className="bg-white/5 text-slate-400 uppercase tracking-wider font-semibold border-b border-white/10 text-[11px] 2xl:text-xs">
               <tr>
-                <th className="py-3 px-4">Symbol &amp; Name</th>
-                <th className="py-3 px-3">Account</th>
-                <th className="py-3 px-3">Owner</th>
-                <th className="py-3 px-3 text-right">Shares</th>
-                <th className="py-3 px-3 text-right">Current Price</th>
-                <th className="py-3 px-3 text-right">Market Value (CAD)</th>
-                <th className="py-3 px-3 text-right">Div/Share</th>
-                <th className="py-3 px-3 text-right text-violet-400">
+                <th className="py-3 px-4 2xl:py-4 2xl:px-5">Symbol &amp; Name</th>
+                <th className="py-3 px-3 2xl:py-4 2xl:px-4">Account</th>
+                <th className="py-3 px-3 2xl:py-4 2xl:px-4">Owner</th>
+                <th className="py-3 px-3 2xl:py-4 2xl:px-4 text-right">Shares</th>
+                <th className="py-3 px-3 2xl:py-4 2xl:px-4 text-right">Current Price</th>
+                <th className="py-3 px-3 2xl:py-4 2xl:px-4 text-right">Market Value (CAD)</th>
+                <th className="py-3 px-3 2xl:py-4 2xl:px-4 text-right">Div/Share</th>
+                <th className="py-3 px-3 2xl:py-4 2xl:px-4 text-right text-violet-400">
                   Annual Income
                 </th>
-                <th className="py-3 px-3 text-right">Yield (YOC)</th>
-                <th className="py-3 px-3 text-center">DRIP</th>
-                <th className="py-3 px-3 text-center">Action</th>
+                <th className="py-3 px-3 2xl:py-4 2xl:px-4 text-right">Yield (YOC)</th>
+                <th className="py-3 px-3 2xl:py-4 2xl:px-4 text-center">DRIP</th>
+                <th className="py-3 px-3 2xl:py-4 2xl:px-4 text-center">Action</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-white/5">
@@ -627,25 +741,25 @@ export function DividendTrackerModule({ state, onUpdateState }: DividendTrackerM
                     key={h.id}
                     className="hover:bg-white/5 transition-colors"
                   >
-                    <td className="py-3 px-4">
+                    <td className="py-3 px-4 2xl:py-4 2xl:px-5">
                       <div className="flex items-center space-x-1.5 font-bold text-white">
                         <span>{h.symbol}</span>
-                        <span className="text-[10px] font-mono text-slate-400 bg-white/10 px-1.5 py-0.5 rounded-md border border-white/10">
+                        <span className="text-[10px] 2xl:text-xs font-mono text-slate-400 bg-white/10 px-1.5 py-0.5 rounded-md border border-white/10">
                           {h.currency}
                         </span>
                       </div>
-                      <div className="text-[11px] text-slate-400 truncate max-w-xs">{h.name}</div>
+                      <div className="text-[11px] 2xl:text-xs text-slate-400 truncate max-w-xs">{h.name}</div>
                     </td>
-                    <td className="py-3 px-3">
+                    <td className="py-3 px-3 2xl:py-4 2xl:px-4">
                       <span
-                        className={`px-2 py-0.5 rounded-md text-[10px] font-bold ${
+                        className={`px-2 py-0.5 rounded-md text-[10px] 2xl:text-xs font-bold ${
                           ACCOUNT_COLORS[h.accountType]
                         }`}
                       >
                         {h.accountType}
                       </span>
                     </td>
-                    <td className="py-3 px-3 font-semibold text-slate-300 whitespace-nowrap">
+                    <td className="py-3 px-3 2xl:py-4 2xl:px-4 font-semibold text-slate-300 whitespace-nowrap">
                       {h.owner === 'bunny' && (
                         <span className="inline-flex items-center gap-1 text-rose-300">🐰 Bunny</span>
                       )}
@@ -661,33 +775,33 @@ export function DividendTrackerModule({ state, onUpdateState }: DividendTrackerM
                         <span className="inline-flex items-center gap-1 text-indigo-300">🤝 Joint</span>
                       )}
                     </td>
-                    <td className="py-3 px-3 text-right font-mono font-medium text-slate-200">{h.shares}</td>
-                    <td className="py-3 px-3 text-right font-mono text-slate-400">
+                    <td className="py-3 px-3 2xl:py-4 2xl:px-4 text-right font-mono font-medium text-slate-200">{h.shares}</td>
+                    <td className="py-3 px-3 2xl:py-4 2xl:px-4 text-right font-mono text-slate-400">
                       {h.currency === 'USD' ? '$' : 'CA$'}
                       {h.currentPrice.toFixed(2)}
                     </td>
-                    <td className="py-3 px-3 text-right font-mono font-bold text-white">
+                    <td className="py-3 px-3 2xl:py-4 2xl:px-4 text-right font-mono font-bold text-white">
                       {formatCurrency(marketValCAD)}
                     </td>
-                    <td className="py-3 px-3 text-right font-mono text-slate-400">
+                    <td className="py-3 px-3 2xl:py-4 2xl:px-4 text-right font-mono text-slate-400">
                       {h.currency === 'USD' ? '$' : 'CA$'}
                       {h.annualDividendPerShare.toFixed(2)}
                     </td>
-                    <td className="py-3 px-3 text-right font-mono font-bold text-violet-400">
+                    <td className="py-3 px-3 2xl:py-4 2xl:px-4 text-right font-mono font-bold text-violet-400">
                       {formatCurrency(annualIncomeCAD)}
                     </td>
-                    <td className="py-3 px-3 text-right font-mono">
+                    <td className="py-3 px-3 2xl:py-4 2xl:px-4 text-right font-mono">
                       <div className="font-semibold text-slate-200">
                         {formatPercent(currentYield, 2)}
                       </div>
-                      <div className="text-[10px] text-sky-400">
+                      <div className="text-[10px] 2xl:text-xs text-sky-400">
                         YOC {formatPercent(yoc, 2)}
                       </div>
                     </td>
-                    <td className="py-3 px-3 text-center">
+                    <td className="py-3 px-3 2xl:py-4 2xl:px-4 text-center">
                       <button
                         onClick={() => handleToggleDRIP(h.id)}
-                        className={`text-[10px] px-2.5 py-0.5 rounded-full font-bold transition-all border ${
+                        className={`text-[10px] 2xl:text-xs px-2.5 py-0.5 rounded-full font-bold transition-all border ${
                           h.dripEnabled
                             ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30'
                             : 'bg-white/5 text-slate-400 border-white/10'
@@ -696,7 +810,7 @@ export function DividendTrackerModule({ state, onUpdateState }: DividendTrackerM
                         {h.dripEnabled ? 'DRIP ON' : 'OFF'}
                       </button>
                     </td>
-                    <td className="py-3 px-3 text-center">
+                    <td className="py-3 px-3 2xl:py-4 2xl:px-4 text-center">
                       <button
                         onClick={() => handleDeleteHolding(h.id)}
                         className="p-1.5 text-slate-400 hover:text-rose-400 hover:bg-rose-500/20 rounded-lg transition-all"
@@ -711,17 +825,17 @@ export function DividendTrackerModule({ state, onUpdateState }: DividendTrackerM
             </tbody>
             <tfoot className="bg-white/5 font-bold border-t border-white/10">
               <tr>
-                <td colSpan={5} className="py-3 px-4 text-slate-300">
+                <td colSpan={5} className="py-3 px-4 2xl:py-4 2xl:px-5 text-slate-300">
                   Total Active Dividend Portfolio
                 </td>
-                <td className="py-3 px-3 text-right font-mono text-white">
+                <td className="py-3 px-3 2xl:py-4 2xl:px-4 text-right font-mono text-white">
                   {formatCurrency(metrics.totalMarketValueCAD)}
                 </td>
                 <td></td>
-                <td className="py-3 px-3 text-right font-mono text-violet-400">
+                <td className="py-3 px-3 2xl:py-4 2xl:px-4 text-right font-mono text-violet-400">
                   {formatCurrency(metrics.totalPadiCAD)}
                 </td>
-                <td className="py-3 px-3 text-right font-mono text-sky-400">
+                <td className="py-3 px-3 2xl:py-4 2xl:px-4 text-right font-mono text-sky-400">
                   Avg YOC {formatPercent(metrics.yieldOnCostPercent, 2)}
                 </td>
                 <td colSpan={2}></td>
@@ -731,39 +845,150 @@ export function DividendTrackerModule({ state, onUpdateState }: DividendTrackerM
         </div>
       </div>
 
-      {/* --- ADD HOLDING MODAL --- */}
+      {/* --- ADD HOLDING MODAL WITH REAL-TIME TICKER & DIVIDEND AUTO-LOOKUP --- */}
       {showAddHoldingModal && (
-        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-md flex items-center justify-center p-4">
-          <div className="bg-slate-900/95 backdrop-blur-xl rounded-2xl max-w-lg w-full p-6 border border-white/15 shadow-2xl shadow-black/50 text-slate-100">
-            <h3 className="text-base font-bold text-white mb-4">
-              Add Equity / Dividend Holding
-            </h3>
+        <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-md flex items-center justify-center p-4 overflow-y-auto">
+          <div className="bg-slate-900/95 backdrop-blur-xl rounded-2xl max-w-xl 2xl:max-w-2xl w-full p-6 2xl:p-8 border border-white/15 shadow-2xl shadow-black/60 text-slate-100 my-8">
+            <div className="flex items-center justify-between pb-3 border-b border-white/10 mb-4">
+              <div>
+                <h3 className="text-base 2xl:text-xl font-bold text-white flex items-center gap-2">
+                  <span className="p-1.5 rounded-lg bg-violet-500/20 text-violet-300 border border-violet-500/30">
+                    <Plus className="w-4 h-4 2xl:w-5 2xl:h-5" />
+                  </span>
+                  Add Ticker / Holding
+                </h3>
+                <p className="text-xs 2xl:text-sm text-slate-400 mt-0.5">
+                  Fetch live market prices and dividend distributions across US and Canadian TSX equities
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setShowAddHoldingModal(false);
+                  setQuoteFetchError(null);
+                  setQuoteFetchSuccess(null);
+                }}
+                className="text-slate-400 hover:text-white p-1 rounded-lg hover:bg-white/10 transition-all text-sm font-bold"
+              >
+                ✕
+              </button>
+            </div>
 
-            <form onSubmit={handleAddHolding} className="space-y-4 text-xs">
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block font-medium text-slate-300 mb-1">
-                    Ticker Symbol *
-                  </label>
+            {/* Quick Presets */}
+            <div className="mb-4">
+              <span className="text-[11px] 2xl:text-xs text-slate-400 font-medium block mb-1.5">
+                Quick Preset Tickers:
+              </span>
+              <div className="flex flex-wrap gap-1.5">
+                {QUICK_TICKERS.map((t) => (
+                  <button
+                    key={t.symbol}
+                    type="button"
+                    onClick={() => handleFetchQuote(t.symbol)}
+                    className="text-[11px] 2xl:text-xs font-mono px-2.5 py-1 rounded-lg bg-white/5 hover:bg-violet-600/30 hover:border-violet-500/50 border border-white/10 text-slate-300 hover:text-white transition-all flex items-center gap-1"
+                  >
+                    <span>{t.flag}</span>
+                    <span className="font-bold">{t.symbol}</span>
+                    <span className="text-slate-400 text-[10px]">({t.label.split(' ')[0]})</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Auto-Lookup Bar */}
+            <div className="p-3.5 2xl:p-4 rounded-xl bg-white/5 border border-white/10 mb-4 space-y-2">
+              <label className="block text-xs 2xl:text-sm font-semibold text-slate-200">
+                Ticker Symbol &amp; Automated Market Lookup
+              </label>
+              <div className="flex gap-2">
+                <div className="relative flex-1">
+                  <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
                   <input
                     type="text"
                     required
-                    placeholder="e.g. VDY.TO or SCHD"
+                    placeholder="Enter ticker (e.g. VDY.TO, SCHD, ENB.TO, AAPL)"
                     value={newSymbol}
                     onChange={(e) => setNewSymbol(e.target.value)}
-                    className="w-full px-3 py-2 rounded-xl border border-white/15 bg-slate-950/80 text-sm uppercase font-mono text-white placeholder-slate-500 focus:outline-hidden focus:border-violet-400"
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        handleFetchQuote();
+                      }
+                    }}
+                    className="w-full pl-9 pr-3 py-2 2xl:py-2.5 rounded-xl border border-white/15 bg-slate-950/80 text-sm 2xl:text-base uppercase font-mono text-white placeholder-slate-500 focus:outline-hidden focus:border-violet-400"
                   />
                 </div>
+                <button
+                  type="button"
+                  disabled={isFetchingQuote || !newSymbol.trim()}
+                  onClick={() => handleFetchQuote()}
+                  className="px-3.5 py-2 2xl:py-2.5 rounded-xl bg-violet-600 hover:bg-violet-500 disabled:opacity-50 disabled:cursor-not-allowed text-white font-semibold text-xs 2xl:text-sm border border-violet-400/50 shadow-md shadow-violet-600/20 transition-all flex items-center gap-1.5 whitespace-nowrap"
+                >
+                  {isFetchingQuote ? (
+                    <>
+                      <Loader2 className="w-4 h-4 animate-spin text-white" />
+                      <span>Fetching...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Sparkles className="w-4 h-4 text-violet-200" />
+                      <span>Auto-Lookup</span>
+                    </>
+                  )}
+                </button>
+              </div>
+
+              {/* Status & Error Feedback */}
+              {isFetchingQuote && (
+                <div className="text-xs 2xl:text-sm text-violet-300 flex items-center gap-2 pt-1 font-medium">
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                  <span>Connecting to financial markets provider &amp; extracting dividend calendar...</span>
+                </div>
+              )}
+
+              {quoteFetchSuccess && !isFetchingQuote && (
+                <div className="p-2.5 rounded-lg bg-emerald-500/15 border border-emerald-500/30 text-emerald-300 text-xs 2xl:text-sm flex items-start gap-2">
+                  <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
+                  <div>
+                    <span className="font-semibold">{quoteFetchSuccess}</span>
+                  </div>
+                </div>
+              )}
+
+              {quoteFetchError && !isFetchingQuote && (
+                <div className="p-2.5 rounded-lg bg-rose-500/15 border border-rose-500/30 text-rose-300 text-xs 2xl:text-sm flex items-start gap-2">
+                  <AlertCircle className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
+                  <div>
+                    <span>{quoteFetchError}</span>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            <form onSubmit={handleAddHolding} className="space-y-4 text-xs 2xl:text-sm">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
                   <label className="block font-medium text-slate-300 mb-1">
                     Company / Fund Name
                   </label>
                   <input
                     type="text"
-                    placeholder="Vanguard High Dividend Yield ETF"
+                    placeholder="e.g. Vanguard FTSE Canadian High Dividend"
                     value={newName}
                     onChange={(e) => setNewName(e.target.value)}
-                    className="w-full px-3 py-2 rounded-xl border border-white/15 bg-slate-950/80 text-sm text-white placeholder-slate-500 focus:outline-hidden focus:border-violet-400"
+                    className="w-full px-3 py-2 2xl:py-2.5 rounded-xl border border-white/15 bg-slate-950/80 text-white placeholder-slate-500 focus:outline-hidden focus:border-violet-400"
+                  />
+                </div>
+                <div>
+                  <label className="block font-medium text-slate-300 mb-1">
+                    Sector / Theme
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="e.g. Canadian Financials or Clean Energy"
+                    value={newSector}
+                    onChange={(e) => setNewSector(e.target.value)}
+                    className="w-full px-3 py-2 2xl:py-2.5 rounded-xl border border-white/15 bg-slate-950/80 text-white placeholder-slate-500 focus:outline-hidden focus:border-violet-400"
                   />
                 </div>
               </div>
@@ -776,7 +1001,7 @@ export function DividendTrackerModule({ state, onUpdateState }: DividendTrackerM
                   <select
                     value={newAccount}
                     onChange={(e) => setNewAccount(e.target.value as AccountType)}
-                    className="w-full px-3 py-2 rounded-xl border border-white/15 bg-slate-950/80 text-sm text-white focus:outline-hidden"
+                    className="w-full px-3 py-2 2xl:py-2.5 rounded-xl border border-white/15 bg-slate-950/80 text-white focus:outline-hidden font-medium"
                   >
                     <option value="TFSA">TFSA</option>
                     <option value="RRSP">RRSP</option>
@@ -795,7 +1020,7 @@ export function DividendTrackerModule({ state, onUpdateState }: DividendTrackerM
                       setNewOwner(val);
                       if (val === 'piggy') setNewAccount('RESP');
                     }}
-                    className="w-full px-3 py-2 rounded-xl border border-white/15 bg-slate-950/80 text-sm text-white focus:outline-hidden"
+                    className="w-full px-3 py-2 2xl:py-2.5 rounded-xl border border-white/15 bg-slate-950/80 text-white focus:outline-hidden font-medium"
                   >
                     <option value="bunny">🐰 Bunny</option>
                     <option value="monkey">🐵 Monkey</option>
@@ -810,7 +1035,7 @@ export function DividendTrackerModule({ state, onUpdateState }: DividendTrackerM
                   <select
                     value={newCurrency}
                     onChange={(e) => setNewCurrency(e.target.value as 'CAD' | 'USD')}
-                    className="w-full px-3 py-2 rounded-xl border border-white/15 bg-slate-950/80 text-sm text-white focus:outline-hidden"
+                    className="w-full px-3 py-2 2xl:py-2.5 rounded-xl border border-white/15 bg-slate-950/80 text-white focus:outline-hidden font-medium"
                   >
                     <option value="CAD">CAD ($)</option>
                     <option value="USD">USD ($)</option>
@@ -827,10 +1052,24 @@ export function DividendTrackerModule({ state, onUpdateState }: DividendTrackerM
                     type="number"
                     step="any"
                     required
-                    placeholder="150"
+                    placeholder="100"
                     value={newShares}
                     onChange={(e) => setNewShares(e.target.value)}
-                    className="w-full px-3 py-2 rounded-xl border border-white/15 bg-slate-950/80 text-sm font-mono text-white placeholder-slate-500 focus:outline-hidden"
+                    className="w-full px-3 py-2 2xl:py-2.5 rounded-xl border border-white/15 bg-slate-950/80 font-mono text-white placeholder-slate-500 focus:outline-hidden"
+                  />
+                </div>
+                <div>
+                  <label className="block font-medium text-slate-300 mb-1">
+                    Current Price *
+                  </label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    required
+                    placeholder="45.00"
+                    value={newCurrentPrice}
+                    onChange={(e) => setNewCurrentPrice(e.target.value)}
+                    className="w-full px-3 py-2 2xl:py-2.5 rounded-xl border border-white/15 bg-slate-950/80 font-mono text-white placeholder-slate-500 focus:outline-hidden"
                   />
                 </div>
                 <div>
@@ -843,21 +1082,7 @@ export function DividendTrackerModule({ state, onUpdateState }: DividendTrackerM
                     placeholder="42.50"
                     value={newAvgCost}
                     onChange={(e) => setNewAvgCost(e.target.value)}
-                    className="w-full px-3 py-2 rounded-xl border border-white/15 bg-slate-950/80 text-sm font-mono text-white placeholder-slate-500 focus:outline-hidden"
-                  />
-                </div>
-                <div>
-                  <label className="block font-medium text-slate-300 mb-1">
-                    Current Price *
-                  </label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    required
-                    placeholder="47.20"
-                    value={newCurrentPrice}
-                    onChange={(e) => setNewCurrentPrice(e.target.value)}
-                    className="w-full px-3 py-2 rounded-xl border border-white/15 bg-slate-950/80 text-sm font-mono text-white placeholder-slate-500 focus:outline-hidden"
+                    className="w-full px-3 py-2 2xl:py-2.5 rounded-xl border border-white/15 bg-slate-950/80 font-mono text-white placeholder-slate-500 focus:outline-hidden"
                   />
                 </div>
               </div>
@@ -869,11 +1094,11 @@ export function DividendTrackerModule({ state, onUpdateState }: DividendTrackerM
                   </label>
                   <input
                     type="number"
-                    step="0.01"
+                    step="0.001"
                     placeholder="2.15"
                     value={newAnnualDiv}
                     onChange={(e) => setNewAnnualDiv(e.target.value)}
-                    className="w-full px-3 py-2 rounded-xl border border-white/15 bg-slate-950/80 text-sm font-mono text-white placeholder-slate-500 focus:outline-hidden"
+                    className="w-full px-3 py-2 2xl:py-2.5 rounded-xl border border-white/15 bg-slate-950/80 font-mono text-white placeholder-slate-500 focus:outline-hidden"
                   />
                 </div>
                 <div>
@@ -883,7 +1108,7 @@ export function DividendTrackerModule({ state, onUpdateState }: DividendTrackerM
                   <select
                     value={newFreq}
                     onChange={(e) => setNewFreq(e.target.value as PayoutFrequency)}
-                    className="w-full px-3 py-2 rounded-xl border border-white/15 bg-slate-950/80 text-sm text-white focus:outline-hidden"
+                    className="w-full px-3 py-2 2xl:py-2.5 rounded-xl border border-white/15 bg-slate-950/80 text-white focus:outline-hidden"
                   >
                     <option value="Monthly">Monthly</option>
                     <option value="Quarterly">Quarterly</option>
@@ -898,7 +1123,7 @@ export function DividendTrackerModule({ state, onUpdateState }: DividendTrackerM
                   <select
                     value={newDripEnabled ? 'yes' : 'no'}
                     onChange={(e) => setNewDripEnabled(e.target.value === 'yes')}
-                    className="w-full px-3 py-2 rounded-xl border border-white/15 bg-slate-950/80 text-sm text-white focus:outline-hidden"
+                    className="w-full px-3 py-2 2xl:py-2.5 rounded-xl border border-white/15 bg-slate-950/80 text-white focus:outline-hidden"
                   >
                     <option value="yes">Reinvest (DRIP)</option>
                     <option value="no">Cash Payout</option>
@@ -906,32 +1131,82 @@ export function DividendTrackerModule({ state, onUpdateState }: DividendTrackerM
                 </div>
               </div>
 
-              <div>
-                <label className="block font-medium text-slate-300 mb-1">
-                  Sector / Theme
-                </label>
-                <input
-                  type="text"
-                  placeholder="e.g. Canadian Banking or Clean Energy"
-                  value={newSector}
-                  onChange={(e) => setNewSector(e.target.value)}
-                  className="w-full px-3 py-2 rounded-xl border border-white/15 bg-slate-950/80 text-sm text-white placeholder-slate-500 focus:outline-hidden"
-                />
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block font-medium text-slate-300 mb-1">
+                    Next Ex-Dividend Date
+                  </label>
+                  <input
+                    type="date"
+                    value={newExDate}
+                    onChange={(e) => setNewExDate(e.target.value)}
+                    className="w-full px-3 py-2 2xl:py-2.5 rounded-xl border border-white/15 bg-slate-950/80 text-white placeholder-slate-500 focus:outline-hidden font-mono"
+                  />
+                </div>
+                <div>
+                  <label className="block font-medium text-slate-300 mb-1">
+                    Estimated Pay Date
+                  </label>
+                  <input
+                    type="date"
+                    value={newPayDate}
+                    onChange={(e) => setNewPayDate(e.target.value)}
+                    className="w-full px-3 py-2 2xl:py-2.5 rounded-xl border border-white/15 bg-slate-950/80 text-white placeholder-slate-500 focus:outline-hidden font-mono"
+                  />
+                </div>
               </div>
 
-              <div className="flex justify-end space-x-2 pt-2">
+              {/* Calculated Summary Preview Pill */}
+              {parseFloat(newShares) > 0 && parseFloat(newCurrentPrice) > 0 && (
+                <div className="p-3 rounded-xl bg-violet-950/40 border border-violet-500/20 text-xs 2xl:text-sm flex flex-wrap items-center justify-between gap-2">
+                  <div className="text-slate-300">
+                    Position Value:{' '}
+                    <strong className="text-white font-mono">
+                      {newCurrency === 'USD' ? '$' : 'CA$'}
+                      {(parseFloat(newShares) * parseFloat(newCurrentPrice)).toLocaleString('en-US', {
+                        minimumFractionDigits: 2,
+                        maximumFractionDigits: 2,
+                      })}
+                    </strong>
+                  </div>
+                  <div className="text-slate-300">
+                    Est. Annual Income:{' '}
+                    <strong className="text-emerald-400 font-mono">
+                      {newCurrency === 'USD' ? '$' : 'CA$'}
+                      {(
+                        parseFloat(newShares) * (parseFloat(newAnnualDiv) || 0)
+                      ).toLocaleString('en-US', {
+                        minimumFractionDigits: 2,
+                        maximumFractionDigits: 2,
+                      })}
+                      /yr
+                    </strong>
+                  </div>
+                  {parseFloat(newCurrentPrice) > 0 && (
+                    <div className="text-slate-300">
+                      Calculated Yield:{' '}
+                      <strong className="text-sky-400 font-mono">
+                        {(( (parseFloat(newAnnualDiv) || 0) / parseFloat(newCurrentPrice) ) * 100).toFixed(2)}%
+                      </strong>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              <div className="flex justify-end space-x-2 pt-3 border-t border-white/10">
                 <button
                   type="button"
                   onClick={() => setShowAddHoldingModal(false)}
-                  className="px-4 py-2 rounded-xl text-slate-400 hover:text-white border border-white/10 bg-white/5 hover:bg-white/10 transition-all font-medium"
+                  className="px-4 py-2 2xl:py-2.5 rounded-xl text-slate-400 hover:text-white border border-white/10 bg-white/5 hover:bg-white/10 transition-all font-medium"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
-                  className="px-4 py-2 rounded-xl bg-violet-600 text-white hover:bg-violet-500 font-semibold border border-violet-400/50 shadow-lg shadow-violet-600/20 transition-all"
+                  className="px-5 py-2 2xl:py-2.5 rounded-xl bg-violet-600 text-white hover:bg-violet-500 font-semibold border border-violet-400/50 shadow-lg shadow-violet-600/20 transition-all flex items-center gap-1.5"
                 >
-                  Save Position
+                  <CheckCircle2 className="w-4 h-4" />
+                  <span>Save Position</span>
                 </button>
               </div>
             </form>

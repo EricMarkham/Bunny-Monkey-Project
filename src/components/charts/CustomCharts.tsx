@@ -12,28 +12,29 @@ export function CategoryDonutChart({
   totalLabel = 'Total',
   currency = 'CAD',
   height = 240,
+  size = 240,
 }: {
   items: DonutItem[];
   totalLabel?: string;
   currency?: string;
   height?: number;
+  size?: number;
 }) {
   const [hoveredIdx, setHoveredIdx] = useState<number | null>(null);
 
   const total = items.reduce((sum, item) => sum + item.value, 0);
   if (total <= 0) {
     return (
-      <div className="flex h-56 items-center justify-center text-sm text-neutral-400">
+      <div className="flex h-56 items-center justify-center text-sm 2xl:text-base text-neutral-400">
         No expense data to display
       </div>
     );
   }
 
   // Calculate SVG arc segments
-  const size = 200;
   const center = size / 2;
-  const radius = 72;
-  const strokeWidth = 26;
+  const radius = Math.round(size * 0.36);
+  const strokeWidth = Math.round(size * 0.13);
 
   let accumulatedAngle = 0;
   const segments = items
@@ -66,7 +67,7 @@ export function CategoryDonutChart({
   const activeItem = hoveredIdx !== null ? items[hoveredIdx] : null;
 
   return (
-    <div className="flex flex-col items-center sm:flex-row sm:items-center sm:justify-between gap-6">
+    <div className="flex flex-col items-center sm:flex-row sm:items-center sm:justify-between gap-6 2xl:gap-8">
       <div className="relative shrink-0" style={{ width: size, height: size }}>
         <svg
           viewBox={`0 0 ${size} ${size}`}
@@ -90,32 +91,32 @@ export function CategoryDonutChart({
         <div className="absolute inset-0 flex flex-col items-center justify-center text-center pointer-events-none px-2">
           {activeItem ? (
             <>
-              <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider truncate max-w-[90px]">
+              <span className="text-xs 2xl:text-sm font-semibold text-slate-400 uppercase tracking-wider truncate max-w-[110px]">
                 {activeItem.label}
               </span>
-              <span className="text-lg font-bold text-white">
+              <span className="text-lg 2xl:text-2xl font-bold text-white">
                 {formatCurrency(activeItem.value, currency)}
               </span>
-              <span className="text-[11px] font-medium text-slate-400">
+              <span className="text-[11px] 2xl:text-xs font-medium text-slate-400">
                 {((activeItem.value / total) * 100).toFixed(1)}%
               </span>
             </>
           ) : (
             <>
-              <span className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider">
+              <span className="text-[11px] 2xl:text-xs font-semibold text-slate-400 uppercase tracking-wider">
                 {totalLabel}
               </span>
-              <span className="text-lg font-extrabold text-white">
+              <span className="text-lg 2xl:text-2xl font-extrabold text-white">
                 {formatCurrency(total, currency)}
               </span>
-              <span className="text-[11px] text-slate-400">100% total</span>
+              <span className="text-[11px] 2xl:text-xs text-slate-400">100% total</span>
             </>
           )}
         </div>
       </div>
 
       {/* Legend */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-1.5 w-full text-xs max-h-52 overflow-y-auto pr-1">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 2xl:gap-x-6 gap-y-1.5 2xl:gap-y-2.5 w-full text-xs 2xl:text-sm max-h-56 2xl:max-h-64 overflow-y-auto pr-1">
         {items.map((item, idx) => {
           const isHovered = hoveredIdx === idx;
           const pct = ((item.value / total) * 100).toFixed(1);
@@ -124,7 +125,7 @@ export function CategoryDonutChart({
               key={item.label}
               onMouseEnter={() => setHoveredIdx(idx)}
               onMouseLeave={() => setHoveredIdx(null)}
-              className={`flex items-center justify-between p-1.5 rounded-xl cursor-pointer transition-colors border ${
+              className={`flex items-center justify-between p-1.5 2xl:p-2 rounded-xl cursor-pointer transition-colors border ${
                 isHovered
                   ? 'bg-white/10 border-white/20'
                   : 'hover:bg-white/5 border-transparent'
@@ -132,7 +133,7 @@ export function CategoryDonutChart({
             >
               <div className="flex items-center space-x-2 truncate mr-2">
                 <span
-                  className="w-2.5 h-2.5 rounded-full shrink-0"
+                  className="w-2.5 h-2.5 2xl:w-3 2xl:h-3 rounded-full shrink-0"
                   style={{ backgroundColor: item.color }}
                 />
                 <span className="font-medium text-slate-300 truncate">
