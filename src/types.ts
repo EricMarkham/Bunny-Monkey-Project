@@ -140,6 +140,7 @@ export type EcoCategory =
 export interface StatementTransaction {
   id: string;
   date: string; // YYYY-MM-DD
+  statementPeriod?: string; // e.g. "2026-08" (allows billing cycles spanning prior month days like 24-Jul to belong to August Statement)
   merchant: string;
   rawCategory?: string;
   assignedCategory: StatementCategory;

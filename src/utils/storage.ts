@@ -1,5 +1,6 @@
 import { HouseholdState } from '../types';
 import { initialHouseholdState } from '../data/initialData';
+import { sanitizeTransactions } from './finance';
 
 export const LOCAL_STORAGE_KEY = 'bunny_monkey_finance_v1';
 export const SNAPSHOTS_KEY = 'bunny_monkey_finance_snapshots_v1';
@@ -99,8 +100,8 @@ export function sanitizeAndMigrateState(parsed: any): HouseholdState {
       : initialHouseholdState.tripSettlements,
     statementTransactions:
       Array.isArray(parsed.statementTransactions) && parsed.statementTransactions.length > 0
-        ? parsed.statementTransactions
-        : initialHouseholdState.statementTransactions,
+        ? sanitizeTransactions(parsed.statementTransactions)
+        : sanitizeTransactions(initialHouseholdState.statementTransactions),
     holdings: Array.isArray(parsed.holdings) ? parsed.holdings : initialHouseholdState.holdings,
     dripSettings: {
       ...initialHouseholdState.dripSettings,
