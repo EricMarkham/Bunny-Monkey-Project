@@ -8,6 +8,7 @@ import { TripSettlementModule } from './components/TripSettlementModule';
 import { StatementParserModule } from './components/StatementParserModule';
 import { DividendTrackerModule } from './components/DividendTrackerModule';
 import { StoragePersistenceModal } from './components/StoragePersistenceModal';
+import { HouseholdEntryGate, HOUSEHOLD_AUTH_KEY } from './components/HouseholdEntryGate';
 import {
   saveHouseholdState,
   loadHouseholdState,
@@ -16,6 +17,15 @@ import {
 } from './utils/storage';
 
 export default function App() {
+  // Household Entry Gate Access State
+  const [isAuthenticated, setIsAuthenticated] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem(HOUSEHOLD_AUTH_KEY) === 'true';
+    } catch {
+      return false;
+    }
+  });
+
   const [state, setState] = useState<HouseholdState>(() => {
     try {
       const saved = localStorage.getItem(LOCAL_STORAGE_KEY);
@@ -89,6 +99,25 @@ export default function App() {
     }));
   };
 
+  // Lock / Sign out of Household session
+  const handleLock = () => {
+    try {
+      localStorage.removeItem(HOUSEHOLD_AUTH_KEY);
+    } catch (e) {
+      console.error('Error clearing auth from localStorage', e);
+    }
+    setIsAuthenticated(false);
+  };
+
+  // Full-Screen Entry Gate: completely block and do not render any dashboard, navigation, or financial views if unauthenticated
+  if (!isAuthenticated) {
+    return (
+      <HouseholdEntryGate
+        onAuthenticated={() => setIsAuthenticated(true)}
+      />
+    );
+  }
+
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans relative overflow-x-hidden selection:bg-indigo-500 selection:text-white">
       {/* Frosted Glass Ambient Gradient Glow Orbs */}
@@ -109,6 +138,7 @@ export default function App() {
         onResetDemo={() => setShowResetConfirm(true)}
         onUpdatePartner={handleUpdatePartner}
         onOpenStorageModal={() => setShowStorageModal(true)}
+        onLock={handleLock}
       />
 
       {/* Main Content Area */}

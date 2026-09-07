@@ -11,6 +11,7 @@ import {
   CheckCircle2,
   BarChart3,
   Database,
+  Lock,
 } from 'lucide-react';
 import { HouseholdState, Partner } from '../types';
 import { formatCurrency } from '../utils/finance';
@@ -24,6 +25,7 @@ interface NavbarProps {
   onResetDemo: () => void;
   onUpdatePartner: (partnerKey: 'bunny' | 'monkey', updated: Partial<Partner>) => void;
   onOpenStorageModal?: () => void;
+  onLock?: () => void;
 }
 
 export function Navbar({
@@ -34,6 +36,7 @@ export function Navbar({
   onImportJSON,
   onResetDemo,
   onOpenStorageModal,
+  onLock,
 }: NavbarProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -194,6 +197,18 @@ export function Navbar({
             >
               <RotateCcw className="w-3.5 h-3.5" />
             </button>
+
+            {onLock && (
+              <button
+                onClick={onLock}
+                title="Lock session & require household passcode"
+                className="flex items-center space-x-1.5 p-2 px-2.5 text-slate-300 hover:text-amber-300 bg-white/5 hover:bg-amber-500/15 border border-white/10 rounded-xl transition-all"
+                aria-label="Lock app"
+              >
+                <Lock className="w-3.5 h-3.5" />
+                <span className="text-xs font-semibold">Lock</span>
+              </button>
+            )}
           </div>
         </div>
       </div>
