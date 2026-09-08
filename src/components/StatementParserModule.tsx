@@ -480,21 +480,46 @@ export function StatementParserModule({
   };
 
   // Delete committed item from master list and database
-  const handleDeleteCommittedItem = (id: string) => {
+  const handleDeleteCommittedItem = async (id: string) => {
     const updated = activeTransactions.filter((i) => i.id !== id);
     setDbTransactions(updated);
     onUpdateState((prev) => ({
       ...prev,
       statementTransactions: updated,
     }));
-    deleteTransactionFromSupabase(id);
+    if (isSupabaseConfigured()) {
+      try {
+        await supabase.from('transactions').delete().eq('id', id);
+        try {
+          await supabase.from('statement_transactions').delete().eq('id', id);
+        } catch {
+          // ignore mirror error
+        }
+      } catch (err) {
+        console.warn('[Supabase] direct transaction delete error:', err);
+      }
+    }
+    await deleteTransactionFromSupabase(id);
+    setSyncStatus('✓ Transaction deleted from Supabase');
+    setTimeout(() => setSyncStatus(null), 3000);
   };
 
   // Update committed transaction category
-  const handleUpdateCommittedCategory = (id: string, category: StatementCategory) => {
+  const handleUpdateCommittedCategory = async (id: string, category: StatementCategory) => {
     const target = activeTransactions.find((tx) => tx.id === id);
     if (target) {
-      insertOrUpdateTransactionInSupabase({ ...target, assignedCategory: category });
+      const updatedTx = { ...target, assignedCategory: category };
+      if (isSupabaseConfigured()) {
+        try {
+          const row = mapTransactionToRow(updatedTx);
+          await supabase.from('transactions').update(row).eq('id', id);
+        } catch (err) {
+          console.warn('[Supabase] direct transaction category update error:', err);
+        }
+      }
+      await insertOrUpdateTransactionInSupabase(updatedTx);
+      setSyncStatus('✓ Category updated in Supabase');
+      setTimeout(() => setSyncStatus(null), 3000);
     }
     const updated = activeTransactions.map((tx) =>
       tx.id === id ? { ...tx, assignedCategory: category } : tx
@@ -507,10 +532,21 @@ export function StatementParserModule({
   };
 
   // Update committed transaction statement period
-  const handleUpdateCommittedPeriod = (id: string, newPeriod: string) => {
+  const handleUpdateCommittedPeriod = async (id: string, newPeriod: string) => {
     const target = activeTransactions.find((tx) => tx.id === id);
     if (target) {
-      insertOrUpdateTransactionInSupabase({ ...target, statementPeriod: newPeriod });
+      const updatedTx = { ...target, statementPeriod: newPeriod };
+      if (isSupabaseConfigured()) {
+        try {
+          const row = mapTransactionToRow(updatedTx);
+          await supabase.from('transactions').update(row).eq('id', id);
+        } catch (err) {
+          console.warn('[Supabase] direct transaction period update error:', err);
+        }
+      }
+      await insertOrUpdateTransactionInSupabase(updatedTx);
+      setSyncStatus('✓ Statement period updated in Supabase');
+      setTimeout(() => setSyncStatus(null), 3000);
     }
     const updated = activeTransactions.map((tx) =>
       tx.id === id ? { ...tx, statementPeriod: newPeriod } : tx
@@ -529,12 +565,23 @@ export function StatementParserModule({
   };
 
   // Save edited committed amount
-  const handleSaveEditAmount = (id: string) => {
+  const handleSaveEditAmount = async (id: string) => {
     const num = parseFloat(editAmountVal) || 0;
     const absNum = Math.abs(num);
     const target = activeTransactions.find((tx) => tx.id === id);
     if (target) {
-      insertOrUpdateTransactionInSupabase({ ...target, amount: absNum });
+      const updatedTx = { ...target, amount: absNum };
+      if (isSupabaseConfigured()) {
+        try {
+          const row = mapTransactionToRow(updatedTx);
+          await supabase.from('transactions').update(row).eq('id', id);
+        } catch (err) {
+          console.warn('[Supabase] direct transaction amount update error:', err);
+        }
+      }
+      await insertOrUpdateTransactionInSupabase(updatedTx);
+      setSyncStatus('✓ Amount updated in Supabase');
+      setTimeout(() => setSyncStatus(null), 3000);
     }
     const updated = activeTransactions.map((tx) =>
       tx.id === id ? { ...tx, amount: absNum } : tx

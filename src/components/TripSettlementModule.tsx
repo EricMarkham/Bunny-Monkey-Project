@@ -143,7 +143,7 @@ export function TripSettlementModule({ state, onUpdateState }: TripSettlementMod
   }, []);
 
   // Delete Trip Handler
-  const handleDeleteTrip = (tripId: string) => {
+  const handleDeleteTrip = async (tripId: string) => {
     onUpdateState((prev) => {
       const remainingTrips = prev.trips.filter((t) => t.id !== tripId);
       const updatedExpenses = prev.tripExpenses.filter((e) => e.tripId !== tripId);
@@ -160,7 +160,9 @@ export function TripSettlementModule({ state, onUpdateState }: TripSettlementMod
       };
     });
     // Immediately delete trip from Supabase
-    deleteTripFromSupabase(tripId);
+    await deleteTripFromSupabase(tripId);
+    setSyncStatus('✓ Trip deleted from Supabase');
+    setTimeout(() => setSyncStatus(null), 3000);
     setTripToDelete(null);
   };
 
@@ -217,7 +219,7 @@ export function TripSettlementModule({ state, onUpdateState }: TripSettlementMod
   };
 
   // Create Trip Handler
-  const handleCreateTrip = (e: React.FormEvent) => {
+  const handleCreateTrip = async (e: React.FormEvent) => {
     e.preventDefault();
     const budget = parseFloat(tripBudget);
     if (!tripName.trim() || isNaN(budget) || budget <= 0) return;
@@ -238,7 +240,9 @@ export function TripSettlementModule({ state, onUpdateState }: TripSettlementMod
     }));
 
     // Immediately execute database insert query in Supabase
-    insertOrUpdateTripInSupabase(newTrip);
+    await insertOrUpdateTripInSupabase(newTrip);
+    setSyncStatus('✓ Trip created in Supabase');
+    setTimeout(() => setSyncStatus(null), 3000);
 
     setTripName('');
     setTripDest('');
@@ -439,7 +443,7 @@ export function TripSettlementModule({ state, onUpdateState }: TripSettlementMod
   );
 
   // Add Expense
-  const handleAddExpense = (e: React.FormEvent) => {
+  const handleAddExpense = async (e: React.FormEvent) => {
     e.preventDefault();
     const cost = parseFloat(expCost);
     if (!expDesc.trim() || isNaN(cost) || cost <= 0) return;
@@ -477,13 +481,15 @@ export function TripSettlementModule({ state, onUpdateState }: TripSettlementMod
     });
 
     // Immediately persist trip expense to Supabase
-    insertOrUpdateTripExpenseInSupabase(newExpense);
+    await insertOrUpdateTripExpenseInSupabase(newExpense);
     if (expPaidBy === 'sinking_fund' && vacationFund) {
-      updateSinkingFundBalanceInSupabase(
+      await updateSinkingFundBalanceInSupabase(
         vacationFund.id,
         Math.max(0, vacationFund.currentBalance - cost)
       );
     }
+    setSyncStatus('✓ Trip expense saved to Supabase');
+    setTimeout(() => setSyncStatus(null), 3000);
 
     setExpDesc('');
     setExpCost('');
@@ -493,7 +499,7 @@ export function TripSettlementModule({ state, onUpdateState }: TripSettlementMod
   };
 
   // Toggle Sinking Fund coverage on an existing expense
-  const handleToggleSinkingFundCoverage = (expenseId: string) => {
+  const handleToggleSinkingFundCoverage = async (expenseId: string) => {
     const exp = state.tripExpenses.find((e) => e.id === expenseId);
     if (!exp) return;
     const willBeFunded = !exp.fundedBySinkingFund;
@@ -531,26 +537,30 @@ export function TripSettlementModule({ state, onUpdateState }: TripSettlementMod
     });
 
     // Immediately persist update to Supabase
-    insertOrUpdateTripExpenseInSupabase(updatedExpense);
+    await insertOrUpdateTripExpenseInSupabase(updatedExpense);
     if (vacationFund) {
       const newBal = willBeFunded
         ? Math.max(0, vacationFund.currentBalance - exp.totalCost)
         : vacationFund.currentBalance + exp.totalCost;
-      updateSinkingFundBalanceInSupabase(vacationFund.id, newBal);
+      await updateSinkingFundBalanceInSupabase(vacationFund.id, newBal);
     }
+    setSyncStatus('✓ Trip expense updated in Supabase');
+    setTimeout(() => setSyncStatus(null), 3000);
   };
 
-  const handleDeleteExpense = (id: string) => {
+  const handleDeleteExpense = async (id: string) => {
     onUpdateState((prev) => ({
       ...prev,
       tripExpenses: prev.tripExpenses.filter((e) => e.id !== id),
     }));
     // Immediately delete expense from Supabase
-    deleteTripExpenseFromSupabase(id);
+    await deleteTripExpenseFromSupabase(id);
+    setSyncStatus('✓ Trip expense deleted from Supabase');
+    setTimeout(() => setSyncStatus(null), 3000);
   };
 
   // Process Reimbursement from Sinking Fund for selected expenses
-  const handleExecuteReimbursement = () => {
+  const handleExecuteReimbursement = async () => {
     if (selectedExpenseIds.length === 0 || !vacationFund) return;
 
     const selectedExpenses = tripExpensesList.filter((e) =>
@@ -590,17 +600,19 @@ export function TripSettlementModule({ state, onUpdateState }: TripSettlementMod
     });
 
     // Immediately persist reimbursed expenses and updated fund balance to Supabase
-    selectedExpenses.forEach((e) => {
-      insertOrUpdateTripExpenseInSupabase({
+    for (const e of selectedExpenses) {
+      await insertOrUpdateTripExpenseInSupabase({
         ...e,
         fundedBySinkingFund: true,
         sinkingFundId: vacationFund.id,
       });
-    });
-    updateSinkingFundBalanceInSupabase(
+    }
+    await updateSinkingFundBalanceInSupabase(
       vacationFund.id,
       Math.max(0, vacationFund.currentBalance - totalToReimburse)
     );
+    setSyncStatus('✓ Sinking fund reimbursement saved to Supabase');
+    setTimeout(() => setSyncStatus(null), 3000);
 
     confetti({
       particleCount: 100,

@@ -300,6 +300,7 @@ export async function fetchHouseholdStateFromSupabase(): Promise<{
     }
 
     // Check if settings table has partner income configuration
+    let hasSettingsData = false;
     try {
       const { data: settingsData } = await supabase
         .from('settings')
@@ -308,11 +309,20 @@ export async function fetchHouseholdStateFromSupabase(): Promise<{
         .maybeSingle();
 
       if (settingsData?.value) {
+        hasSettingsData = true;
         baseState = {
           ...baseState,
           partners: {
-            bunny: { ...baseState.partners.bunny, ...settingsData.value.bunny },
-            monkey: { ...baseState.partners.monkey, ...settingsData.value.monkey },
+            bunny: {
+              ...baseState.partners.bunny,
+              netMonthlyIncome: Number(settingsData.value.bunny?.netMonthlyIncome ?? baseState.partners.bunny.netMonthlyIncome),
+              grossMonthlyIncome: Number(settingsData.value.bunny?.grossMonthlyIncome ?? baseState.partners.bunny.grossMonthlyIncome),
+            },
+            monkey: {
+              ...baseState.partners.monkey,
+              netMonthlyIncome: Number(settingsData.value.monkey?.netMonthlyIncome ?? baseState.partners.monkey.netMonthlyIncome),
+              grossMonthlyIncome: Number(settingsData.value.monkey?.grossMonthlyIncome ?? baseState.partners.monkey.grossMonthlyIncome),
+            },
           },
         };
       }
@@ -357,6 +367,7 @@ export async function fetchHouseholdStateFromSupabase(): Promise<{
     // Check if brand new empty database with zero data across all tables
     const isFreshDatabase =
       !unifiedData?.state &&
+      !hasSettingsData &&
       (!expensesRes.data || expensesRes.data.length === 0) &&
       (!tripsRes.data || tripsRes.data.length === 0) &&
       (!holdingsRes.data || holdingsRes.data.length === 0) &&
@@ -769,38 +780,67 @@ export async function updatePartnerIncomesInSupabase(partners: {
 }): Promise<void> {
   if (!isSupabaseConfigured()) return;
   try {
+    const timestamp = new Date().toISOString();
+
     // 1. Direct update query into settings table
     try {
-      await supabase.from('settings').upsert(
-        {
-          id: 'partners',
+      const { data: updateData, error: updateErr } = await supabase
+        .from('settings')
+        .update({
           value: partners,
-          updated_at: new Date().toISOString(),
-        },
-        { onConflict: 'id' }
-      );
+          updated_at: timestamp,
+        })
+        .eq('id', 'partners')
+        .select();
+
+      // If no existing row was updated or an error occurred, perform upsert fallback
+      if (updateErr || !updateData || updateData.length === 0) {
+        await supabase.from('settings').upsert(
+          {
+            id: 'partners',
+            value: partners,
+            updated_at: timestamp,
+          },
+          { onConflict: 'id' }
+        );
+      }
     } catch (settingsErr) {
       console.warn('[Supabase] Could not update settings table:', settingsErr);
     }
 
     // 2. Direct update query into household_state table
-    const { data } = await supabase
-      .from('household_state')
-      .select('state')
-      .eq('id', 'current_household_state')
-      .maybeSingle();
+    try {
+      const { data } = await supabase
+        .from('household_state')
+        .select('state')
+        .eq('id', 'current_household_state')
+        .maybeSingle();
 
-    const currentState = data?.state || {};
-    const updatedState = { ...currentState, partners };
+      const currentState = data?.state || {};
+      const updatedState = { ...currentState, partners };
 
-    await supabase.from('household_state').upsert(
-      {
-        id: 'current_household_state',
-        state: updatedState,
-        updated_at: new Date().toISOString(),
-      },
-      { onConflict: 'id' }
-    );
+      const { data: hsUpdateData, error: hsUpdateErr } = await supabase
+        .from('household_state')
+        .update({
+          state: updatedState,
+          updated_at: timestamp,
+        })
+        .eq('id', 'current_household_state')
+        .select();
+
+      if (hsUpdateErr || !hsUpdateData || hsUpdateData.length === 0) {
+        await supabase.from('household_state').upsert(
+          {
+            id: 'current_household_state',
+            state: updatedState,
+            updated_at: timestamp,
+          },
+          { onConflict: 'id' }
+        );
+      }
+    } catch (hsErr) {
+      console.warn('[Supabase] Could not update household_state table:', hsErr);
+    }
   } catch (err) {
     console.error('[Supabase] updatePartnerIncomes error:', err);
   }

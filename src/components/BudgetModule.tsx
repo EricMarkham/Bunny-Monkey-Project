@@ -18,6 +18,7 @@ import {
   Sparkles,
   BarChart3,
   RefreshCw,
+  Loader2,
 } from 'lucide-react';
 import {
   ExpenseCategory,
@@ -45,6 +46,8 @@ import {
   updatePartnerIncomesInSupabase,
   mapRowToExpense,
   mapRowToSinkingFund,
+  mapExpenseToRow,
+  mapSinkingFundToRow,
 } from '../services/supabaseService';
 import { supabase, isSupabaseConfigured } from '../lib/supabase';
 
@@ -130,15 +133,18 @@ export function BudgetModule({
   // Cloud sync state for BudgetModule
   const [isSyncing, setIsSyncing] = useState(false);
   const [syncStatus, setSyncStatus] = useState<string | null>(null);
+  const [isSavingIncome, setIsSavingIncome] = useState(false);
+  const [incomeSaveError, setIncomeSaveError] = useState<string | null>(null);
 
   const syncFromSupabase = async () => {
     if (!isSupabaseConfigured()) return;
     setIsSyncing(true);
     try {
-      const [expRes, sfRes, settingsRes] = await Promise.all([
+      const [expRes, sfRes, settingsRes, hsRes] = await Promise.all([
         supabase.from('expenses').select('*'),
         supabase.from('sinking_funds').select('*'),
         supabase.from('settings').select('value').eq('id', 'partners').maybeSingle(),
+        supabase.from('household_state').select('state').eq('id', 'current_household_state').maybeSingle(),
       ]);
       if (!expRes.error && expRes.data) {
         onUpdateState((prev) => ({
@@ -152,14 +158,39 @@ export function BudgetModule({
           sinkingFunds: sfRes.data.map(mapRowToSinkingFund),
         }));
       }
-      if (!settingsRes.error && settingsRes.data?.value) {
+      const remotePartners =
+        (!settingsRes.error && settingsRes.data?.value)
+          ? settingsRes.data.value
+          : (!hsRes.error && hsRes.data?.state?.partners)
+          ? hsRes.data.state.partners
+          : null;
+
+      if (remotePartners) {
+        const bNet = Number(remotePartners.bunny?.netMonthlyIncome ?? state.partners.bunny.netMonthlyIncome);
+        const bGross = Number(remotePartners.bunny?.grossMonthlyIncome ?? state.partners.bunny.grossMonthlyIncome);
+        const mNet = Number(remotePartners.monkey?.netMonthlyIncome ?? state.partners.monkey.netMonthlyIncome);
+        const mGross = Number(remotePartners.monkey?.grossMonthlyIncome ?? state.partners.monkey.grossMonthlyIncome);
+
         onUpdateState((prev) => ({
           ...prev,
           partners: {
-            bunny: { ...prev.partners.bunny, ...settingsRes.data.value.bunny },
-            monkey: { ...prev.partners.monkey, ...settingsRes.data.value.monkey },
+            bunny: {
+              ...prev.partners.bunny,
+              netMonthlyIncome: bNet,
+              grossMonthlyIncome: bGross,
+            },
+            monkey: {
+              ...prev.partners.monkey,
+              netMonthlyIncome: mNet,
+              grossMonthlyIncome: mGross,
+            },
           },
         }));
+
+        setBunnyNetInput(bNet.toString());
+        setBunnyGrossInput(bGross.toString());
+        setMonkeyNetInput(mNet.toString());
+        setMonkeyGrossInput(mGross.toString());
       }
       setSyncStatus('✓ Synced with Supabase');
       setTimeout(() => setSyncStatus(null), 3000);
@@ -195,7 +226,7 @@ export function BudgetModule({
   }));
 
   // Handle Add Expense
-  const handleAddExpense = (e: React.FormEvent) => {
+  const handleAddExpense = async (e: React.FormEvent) => {
     e.preventDefault();
     const amount = parseFloat(newExpAmount);
     if (!newExpTitle.trim() || isNaN(amount) || amount <= 0) return;
@@ -223,7 +254,20 @@ export function BudgetModule({
     }));
 
     // Immediately execute database insert/update query to persist expense directly in Supabase
-    insertOrUpdateExpenseInSupabase(newExpense);
+    if (isSupabaseConfigured()) {
+      const row = mapExpenseToRow(newExpense);
+      try {
+        const { error } = await supabase.from('expenses').insert(row);
+        if (error) {
+          await supabase.from('expenses').upsert(row, { onConflict: 'id' });
+        }
+      } catch (err) {
+        console.warn('[Supabase] direct expense insert error:', err);
+      }
+    }
+    await insertOrUpdateExpenseInSupabase(newExpense);
+    setSyncStatus('✓ Recurring bill saved to Supabase');
+    setTimeout(() => setSyncStatus(null), 3000);
 
     // Reset
     setNewExpTitle('');
@@ -234,13 +278,22 @@ export function BudgetModule({
     setShowAddExpenseModal(false);
   };
 
-  const handleDeleteExpense = (id: string) => {
+  const handleDeleteExpense = async (id: string) => {
     onUpdateState((prev) => ({
       ...prev,
       expenses: prev.expenses.filter((exp) => exp.id !== id),
     }));
     // Immediately execute database delete query in Supabase
-    deleteExpenseFromSupabase(id);
+    if (isSupabaseConfigured()) {
+      try {
+        await supabase.from('expenses').delete().eq('id', id);
+      } catch (err) {
+        console.warn('[Supabase] direct expense delete error:', err);
+      }
+    }
+    await deleteExpenseFromSupabase(id);
+    setSyncStatus('✓ Expense deleted from Supabase');
+    setTimeout(() => setSyncStatus(null), 3000);
   };
 
   const openEditExpense = (exp: HouseholdExpense) => {
@@ -256,7 +309,7 @@ export function BudgetModule({
     setEditExpNotes(exp.notes || '');
   };
 
-  const handleUpdateExpense = (e: React.FormEvent) => {
+  const handleUpdateExpense = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!editingExpense) return;
     const amount = parseFloat(editExpAmount);
@@ -285,7 +338,20 @@ export function BudgetModule({
     }));
 
     // Immediately execute database update query in Supabase
-    insertOrUpdateExpenseInSupabase(updatedExpense);
+    if (isSupabaseConfigured()) {
+      const row = mapExpenseToRow(updatedExpense);
+      try {
+        const { error } = await supabase.from('expenses').update(row).eq('id', updatedExpense.id);
+        if (error) {
+          await supabase.from('expenses').upsert(row, { onConflict: 'id' });
+        }
+      } catch (err) {
+        console.warn('[Supabase] direct expense update error:', err);
+      }
+    }
+    await insertOrUpdateExpenseInSupabase(updatedExpense);
+    setSyncStatus('✓ Expense updated in Supabase');
+    setTimeout(() => setSyncStatus(null), 3000);
 
     setEditingExpense(null);
   };
@@ -301,7 +367,7 @@ export function BudgetModule({
     setEditSfNotes(fund.notes || '');
   };
 
-  const handleUpdateSinkingFund = (e: React.FormEvent) => {
+  const handleUpdateSinkingFund = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!editingFund) return;
     const target = parseFloat(editSfTarget);
@@ -344,24 +410,46 @@ export function BudgetModule({
     });
 
     // Execute immediate Supabase update
-    insertOrUpdateSinkingFundInSupabase(updatedFund);
+    if (isSupabaseConfigured()) {
+      const row = mapSinkingFundToRow(updatedFund);
+      try {
+        const { error } = await supabase.from('sinking_funds').update(row).eq('id', updatedFund.id);
+        if (error) {
+          await supabase.from('sinking_funds').upsert(row, { onConflict: 'id' });
+        }
+      } catch (err) {
+        console.warn('[Supabase] direct sinking fund update error:', err);
+      }
+    }
+    await insertOrUpdateSinkingFundInSupabase(updatedFund);
+    setSyncStatus('✓ Sinking fund updated in Supabase');
+    setTimeout(() => setSyncStatus(null), 3000);
 
     setEditingFund(null);
   };
 
-  const handleDeleteSinkingFund = (fundId: string) => {
+  const handleDeleteSinkingFund = async (fundId: string) => {
     if (!confirm('Are you sure you want to delete this sinking fund?')) return;
     onUpdateState((prev) => ({
       ...prev,
       sinkingFunds: prev.sinkingFunds.filter((f) => f.id !== fundId),
     }));
     // Execute immediate Supabase delete
-    deleteSinkingFundFromSupabase(fundId);
+    if (isSupabaseConfigured()) {
+      try {
+        await supabase.from('sinking_funds').delete().eq('id', fundId);
+      } catch (err) {
+        console.warn('[Supabase] direct sinking fund delete error:', err);
+      }
+    }
+    await deleteSinkingFundFromSupabase(fundId);
+    setSyncStatus('✓ Sinking fund deleted from Supabase');
+    setTimeout(() => setSyncStatus(null), 3000);
     setEditingFund(null);
   };
 
   // Handle Add Sinking Fund
-  const handleAddSinkingFund = (e: React.FormEvent) => {
+  const handleAddSinkingFund = async (e: React.FormEvent) => {
     e.preventDefault();
     const target = parseFloat(newSfTarget);
     const current = parseFloat(newSfCurrent) || 0;
@@ -384,7 +472,20 @@ export function BudgetModule({
     }));
 
     // Execute immediate Supabase insert
-    insertOrUpdateSinkingFundInSupabase(newFund);
+    if (isSupabaseConfigured()) {
+      const row = mapSinkingFundToRow(newFund);
+      try {
+        const { error } = await supabase.from('sinking_funds').insert(row);
+        if (error) {
+          await supabase.from('sinking_funds').upsert(row, { onConflict: 'id' });
+        }
+      } catch (err) {
+        console.warn('[Supabase] direct sinking fund insert error:', err);
+      }
+    }
+    await insertOrUpdateSinkingFundInSupabase(newFund);
+    setSyncStatus('✓ Sinking fund created in Supabase');
+    setTimeout(() => setSyncStatus(null), 3000);
 
     setNewSfName('');
     setNewSfTarget('');
@@ -394,7 +495,7 @@ export function BudgetModule({
   };
 
   // Handle Sinking Fund Deposit/Withdraw
-  const handleAdjustFundBalance = (e: React.FormEvent) => {
+  const handleAdjustFundBalance = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedFundForAdjust) return;
     const amount = parseFloat(fundAdjustAmount);
@@ -434,15 +535,20 @@ export function BudgetModule({
     });
 
     // Execute immediate Supabase balance update
-    updateSinkingFundBalanceInSupabase(selectedFundForAdjust.id, newBalance);
+    await updateSinkingFundBalanceInSupabase(selectedFundForAdjust.id, newBalance);
+    setSyncStatus('✓ Sinking fund balance updated in Supabase');
+    setTimeout(() => setSyncStatus(null), 3000);
 
     setSelectedFundForAdjust(null);
     setFundAdjustAmount('');
   };
 
-  // Handle Save Incomes
-  const handleSaveIncomes = (e: React.FormEvent) => {
+  // Handle Save Incomes with Direct Supabase Mutation
+  const handleSaveIncomes = async (e: React.FormEvent) => {
     e.preventDefault();
+    setIsSavingIncome(true);
+    setIncomeSaveError(null);
+
     const bNet = parseFloat(bunnyNetInput) || 0;
     const bGross = parseFloat(bunnyGrossInput) || 0;
     const mNet = parseFloat(monkeyNetInput) || 0;
@@ -461,15 +567,81 @@ export function BudgetModule({
       },
     };
 
+    // Update state immediately so UI calculations and split ratios update with zero lag
     onUpdateState((prev) => ({
       ...prev,
       partners: updatedPartners,
     }));
 
-    // Execute immediate Supabase partner incomes update
-    updatePartnerIncomesInSupabase(updatedPartners);
+    try {
+      if (isSupabaseConfigured()) {
+        const timestamp = new Date().toISOString();
 
-    setShowIncomeModal(false);
+        // 1. Direct update query into settings table
+        const { data: updateData, error: updateErr } = await supabase
+          .from('settings')
+          .update({
+            value: updatedPartners,
+            updated_at: timestamp,
+          })
+          .eq('id', 'partners')
+          .select();
+
+        // Fallback to upsert if no existing row matched
+        if (updateErr || !updateData || updateData.length === 0) {
+          await supabase.from('settings').upsert(
+            {
+              id: 'partners',
+              value: updatedPartners,
+              updated_at: timestamp,
+            },
+            { onConflict: 'id' }
+          );
+        }
+
+        // 2. Direct update query into household_state table
+        const { data: hsData } = await supabase
+          .from('household_state')
+          .select('state')
+          .eq('id', 'current_household_state')
+          .maybeSingle();
+
+        const currentState = hsData?.state || {};
+        const updatedState = { ...currentState, partners: updatedPartners };
+
+        const { data: hsUpdateData, error: hsUpdateErr } = await supabase
+          .from('household_state')
+          .update({
+            state: updatedState,
+            updated_at: timestamp,
+          })
+          .eq('id', 'current_household_state')
+          .select();
+
+        if (hsUpdateErr || !hsUpdateData || hsUpdateData.length === 0) {
+          await supabase.from('household_state').upsert(
+            {
+              id: 'current_household_state',
+              state: updatedState,
+              updated_at: timestamp,
+            },
+            { onConflict: 'id' }
+          );
+        }
+      }
+
+      // Execute central service helper
+      await updatePartnerIncomesInSupabase(updatedPartners);
+
+      setSyncStatus('✓ Incomes persisted to Supabase');
+      setTimeout(() => setSyncStatus(null), 3000);
+      setShowIncomeModal(false);
+    } catch (err: any) {
+      console.error('[Supabase Partner Income Save Error]', err);
+      setIncomeSaveError(err.message || 'Failed to save to Supabase');
+    } finally {
+      setIsSavingIncome(false);
+    }
   };
 
   // Trigger celebration on a milestone
@@ -1949,19 +2121,71 @@ export function BudgetModule({
                 </div>
               </div>
 
+              {/* Live Preview of recalibrated split */}
+              {(() => {
+                const previewBNet = parseFloat(bunnyNetInput) || 0;
+                const previewMNet = parseFloat(monkeyNetInput) || 0;
+                const previewTotal = previewBNet + previewMNet;
+                const previewBunnyPct = previewTotal > 0 ? (previewBNet / previewTotal) * 100 : 50;
+                const previewMonkeyPct = previewTotal > 0 ? (previewMNet / previewTotal) * 100 : 50;
+                return (
+                  <div className="p-3 rounded-xl bg-indigo-950/30 border border-indigo-500/20">
+                    <div className="flex items-center justify-between text-[11px] text-slate-300 font-medium mb-1.5">
+                      <span className="text-slate-400">Recalibrated Split Ratio:</span>
+                      <span className="font-mono font-bold text-white">
+                        🐰 {previewBunnyPct.toFixed(1)}% / 🐵 {previewMonkeyPct.toFixed(1)}%
+                      </span>
+                    </div>
+                    <div className="w-full h-2 rounded-full overflow-hidden bg-slate-800 flex">
+                      <div
+                        className="h-full bg-rose-500 transition-all duration-300"
+                        style={{ width: `${previewBunnyPct}%` }}
+                      />
+                      <div
+                        className="h-full bg-teal-500 transition-all duration-300"
+                        style={{ width: `${previewMonkeyPct}%` }}
+                      />
+                    </div>
+                    <div className="flex justify-between text-[10px] text-slate-400 mt-1 font-mono">
+                      <span>Joint Net: {formatCurrency(previewTotal)}/mo</span>
+                      <span>Direct Supabase Persistence</span>
+                    </div>
+                  </div>
+                );
+              })()}
+
+              {incomeSaveError && (
+                <div className="p-2.5 rounded-xl bg-rose-500/10 border border-rose-500/30 flex items-center space-x-2 text-rose-300 text-xs">
+                  <AlertCircle className="w-4 h-4 shrink-0" />
+                  <span>{incomeSaveError}</span>
+                </div>
+              )}
+
               <div className="flex justify-end space-x-2 pt-2">
                 <button
                   type="button"
+                  disabled={isSavingIncome}
                   onClick={() => setShowIncomeModal(false)}
-                  className="px-4 py-2 rounded-xl text-xs font-medium text-slate-300 hover:bg-white/10 border border-white/10 transition-colors"
+                  className="px-4 py-2 rounded-xl text-xs font-medium text-slate-300 hover:bg-white/10 border border-white/10 transition-colors disabled:opacity-50"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
-                  className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 border border-indigo-400/50 text-white font-semibold shadow-lg shadow-indigo-600/20 transition-all"
+                  disabled={isSavingIncome}
+                  className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 disabled:opacity-60 border border-indigo-400/50 text-white font-semibold shadow-lg shadow-indigo-600/20 transition-all flex items-center gap-1.5"
                 >
-                  Recalibrate Split
+                  {isSavingIncome ? (
+                    <>
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                      <span>Saving to Supabase...</span>
+                    </>
+                  ) : (
+                    <>
+                      <CheckCircle2 className="w-3.5 h-3.5" />
+                      <span>Recalibrate &amp; Save</span>
+                    </>
+                  )}
                 </button>
               </div>
             </form>
