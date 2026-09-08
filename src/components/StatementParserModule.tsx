@@ -84,33 +84,164 @@ export const CALENDAR_MONTHS = [
 const MIN_VALID_YEAR = 2026;
 const MAX_VALID_YEAR = 2036;
 
-// User's actual August 2026 statement sample for quick 1-click loading and testing
-const SAMPLE_AUGUST_STATEMENT = `24-Jul	FRESHCO #3875 MARKHAM	Groceries	$79.82
-24-Jul	WINCO FOOD MART MARKHAM	Groceries	$213.62
-27-Jul	PETRO-CANADA 00259 GORMLEY	Gas	$49.05
-27-Jul	AJISEN RAMEN UNIONVILLE	Dining Out	$59.45
-28-Jul	Hand and Stone Canada Markham	Health/Beauty	$112.94
-31-Jul	THE BODY SHOP CANADA 1968 HALTON HILLS	Shopping/Beauty	$29.60
-31-Jul	FAMOUS WOK HALTON HILLS	Dining Out	$18.07
-01-Aug	T&T SUPERMARKET #022 UNIONVILLE	Groceries	$158.91
-02-Aug	TEN RENS TEA(UNIONVILLE) MARKHAM	Dining Out	$76.12
-03-Aug	WINNERS 418 STOUFFVILLE	Shopping/Apparel	$24.85
-04-Aug	PETRO-CANADA 33370 MARKHAM	Gas	$32.94
-04-Aug	WAL-MART SUPERCENTER#1029 STOUFFVILLE	Groceries	$87.16
-05-Aug	BOSTON PIZZA # 533 STOUFFVILLE	Dining Out	$69.92
-05-Aug	WINCO FOOD MART MARKHAM	Groceries	$229.26
-07-Aug	CHURCHS CHICKEN #11241 MARKHAM	Dining Out	$26.53
-07-Aug	YOGEN FRUZ MARKVILLE M MARKHAM	Dining Out	$6.38
-09-Aug	LS Kinton Ramen Markha Markham	Dining Out	$54.54
-11-Aug	SAINT GERMAIN BAKERY MARKHAM	Dining Out	$43.11
-13-Aug	MCDONALD S #8766 MARKHAM	Dining Out	$2.83
-14-Aug	WAL-MART SUPERCENTER#3053 MARKHAM	Groceries	$18.58
-14-Aug	PETRO-CANADA 34871 MARKHAM	Gas	$51.56
-16-Aug	T&T SUPERMARKET #021 MARKHAM	Groceries	$222.01
-18-Aug	PETRO-CANADA 65053 MARKHAM	Gas	$36.41
-20-Aug	PEMBRIDGE INS CO. 877-736-2743	Insurance	$245.55
-21-Aug	DAIRY QUEEN #12145 MARKHAM	Dining Out	$16.92
-22-Aug	T&T SUPERMARKET #022 UNIONVILLE	Groceries	$76.57`;
+/**
+ * Split CSV, TSV, or delimited line honoring quotes and whitespace
+ */
+function parseDelimitedLine(line: string): string[] {
+  const trimmed = line.trim();
+  if (!trimmed) return [];
+
+  // Tab separated (Google Sheets / Excel copy-paste)
+  if (trimmed.includes('\t')) {
+    return trimmed.split('\t').map((c) => c.trim().replace(/^["']|["']$/g, ''));
+  }
+
+  // Semicolon separated (European CSV)
+  if (trimmed.includes(';') && !trimmed.includes(',')) {
+    return trimmed.split(';').map((c) => c.trim().replace(/^["']|["']$/g, ''));
+  }
+
+  // Comma separated with quote handling
+  const items: string[] = [];
+  let current = '';
+  let inQuotes = false;
+  for (let i = 0; i < trimmed.length; i++) {
+    const char = trimmed[i];
+    if (char === '"' || char === "'") {
+      inQuotes = !inQuotes;
+    } else if (char === ',' && !inQuotes) {
+      items.push(current.trim().replace(/^["']|["']$/g, ''));
+      current = '';
+    } else {
+      current += char;
+    }
+  }
+  items.push(current.trim().replace(/^["']|["']$/g, ''));
+
+  // Fallback: 2+ whitespace characters
+  if (items.length <= 1 && /\s{2,}/.test(trimmed)) {
+    return trimmed.split(/\s{2,}/).map((c) => c.trim().replace(/^["']|["']$/g, ''));
+  }
+
+  return items;
+}
+
+interface ColumnMapping {
+  hasHeaders: boolean;
+  headerLineIndex: number;
+  dateIdx: number;
+  descIdx: number;
+  catIdx: number;
+  amtIdx: number;
+  whoIdx: number;
+}
+
+/**
+ * Detect column indexes for Date, Description, Category, Amount, and Cardholder/Who
+ */
+function detectColumnMapping(lines: string[]): ColumnMapping {
+  for (let i = 0; i < Math.min(lines.length, 5); i++) {
+    const rawLine = lines[i].trim();
+    if (!rawLine || rawLine.startsWith('#')) continue;
+
+    const cols = parseDelimitedLine(rawLine);
+    if (cols.length < 2) continue;
+
+    let dateIdx = -1;
+    let descIdx = -1;
+    let catIdx = -1;
+    let amtIdx = -1;
+    let whoIdx = -1;
+
+    cols.forEach((rawCol, idx) => {
+      const col = rawCol.toLowerCase().trim().replace(/[^a-z0-9()$]/g, '');
+
+      // 1. Amount / Amount($)
+      if (
+        col.includes('amount') ||
+        col.includes('amount($)') ||
+        col.includes('amount$') ||
+        col === 'cost' ||
+        col === 'total' ||
+        col === 'cad' ||
+        col === 'debit' ||
+        col === 'charge' ||
+        col === 'price'
+      ) {
+        if (amtIdx === -1) amtIdx = idx;
+      }
+      // 2. Date / Transaction Date
+      else if (
+        col.includes('transactiondate') ||
+        col.includes('transdate') ||
+        col.includes('txndate') ||
+        col.includes('postingdate') ||
+        col === 'date' ||
+        col.startsWith('date')
+      ) {
+        if (dateIdx === -1) dateIdx = idx;
+      }
+      // 3. Description / Activity Description
+      else if (
+        col.includes('activitydescription') ||
+        col.includes('description') ||
+        col.includes('merchant') ||
+        col.includes('payee') ||
+        col.includes('details') ||
+        col.includes('narrative') ||
+        col.includes('memo') ||
+        col.includes('title')
+      ) {
+        if (descIdx === -1) descIdx = idx;
+      }
+      // 4. Category
+      else if (
+        col.includes('category') ||
+        col.includes('rawcategory') ||
+        col === 'type' ||
+        col === 'tag'
+      ) {
+        if (catIdx === -1) catIdx = idx;
+      }
+      // 5. Cardholder / Who
+      else if (
+        col.includes('cardholder') ||
+        col.includes('card') ||
+        col === 'who' ||
+        col.includes('partner') ||
+        col.includes('owner') ||
+        col.includes('member') ||
+        col.includes('person') ||
+        col.includes('user')
+      ) {
+        if (whoIdx === -1) whoIdx = idx;
+      }
+    });
+
+    const recognizedCount = [dateIdx, descIdx, catIdx, amtIdx, whoIdx].filter((idx) => idx !== -1).length;
+    if (recognizedCount >= 2) {
+      return {
+        hasHeaders: true,
+        headerLineIndex: i,
+        dateIdx,
+        descIdx,
+        catIdx,
+        amtIdx,
+        whoIdx,
+      };
+    }
+  }
+
+  return {
+    hasHeaders: false,
+    headerLineIndex: -1,
+    dateIdx: 0,
+    descIdx: 1,
+    catIdx: 2,
+    amtIdx: 3,
+    whoIdx: -1,
+  };
+}
 
 /**
  * Intelligent category mapper from raw bank/spreadsheet category strings
@@ -151,6 +282,7 @@ export function StatementParserModule({
   const [selectedPartnerDefault, setSelectedPartnerDefault] = useState<'bunny' | 'monkey'>('bunny');
   const [searchTerm, setSearchTerm] = useState('');
   const [categoryFilter, setCategoryFilter] = useState<string>('all');
+  const [partnerFilter, setPartnerFilter] = useState<'all' | 'bunny' | 'monkey'>('all');
   const [successCommitMessage, setSuccessCommitMessage] = useState<string | null>(null);
 
   // Year validation logic: Must be between 2026 and 2036
@@ -286,7 +418,7 @@ export function StatementParserModule({
     return calculatePeriodAndYtdActuals(activeTransactions, selectedPeriod);
   }, [activeTransactions, selectedPeriod]);
 
-  // Parse lines from raw CSV or spreadsheet copy-paste
+  // Parse lines from raw CSV or spreadsheet copy-paste with automatic column mapping
   const handleParseText = (
     text: string,
     statementPeriodChoice: string = effectiveTargetUploadPeriod,
@@ -299,101 +431,106 @@ export function StatementParserModule({
     // Derive target year from statementPeriodChoice (e.g. "2026-08" -> 2026)
     const targetYear = parseInt(statementPeriodChoice.slice(0, 4), 10) || 2026;
 
+    // Detect column mapping from file headers
+    const mapping = detectColumnMapping(lines);
+
     lines.forEach((line, index) => {
       const trimmed = line.trim();
       if (!trimmed || trimmed.startsWith('#')) return;
 
-      // Skip common table headers
+      // Skip the recognized header row
+      if (mapping.hasHeaders && index === mapping.headerLineIndex) return;
+
+      // Skip common repeating table headers
       const lower = trimmed.toLowerCase();
       if (
         lower.includes('transaction date') ||
         lower.includes('activity description') ||
-        (lower.startsWith('date') && lower.includes('merchant')) ||
-        (lower.startsWith('date') && lower.includes('amount'))
+        (lower.startsWith('date') && (lower.includes('merchant') || lower.includes('amount') || lower.includes('description')))
       ) {
         return;
       }
 
-      // Detect delimiter: tab (Sheets/Excel), semicolon, or comma
-      let parts: string[] = [];
-      if (trimmed.includes('\t')) {
-        parts = trimmed.split('\t');
-      } else if (trimmed.includes(';')) {
-        parts = trimmed.split(';');
-      } else {
-        // Handle comma delimited, honoring quoted strings if present
-        const csvMatches = trimmed.match(/(".*?"|[^",\s]+)(?=\s*,|\s*$)/g);
-        if (csvMatches && csvMatches.length >= 2) {
-          parts = csvMatches;
-        } else {
-          parts = trimmed.split(',');
-        }
-      }
-
-      parts = parts.map((p) => p.trim().replace(/^["']|["']$/g, ''));
-
-      // If parts has less than 2 elements, try splitting on 2+ consecutive spaces
-      if (parts.length < 2) {
-        parts = trimmed.split(/\s{2,}/).map((p) => p.trim().replace(/^["']|["']$/g, ''));
-      }
-
+      const parts = parseDelimitedLine(trimmed);
       if (parts.length < 2) return;
 
-      // Detect which column is what:
-      // Pattern 1 (User Spreadsheet): Col 0 = Date (24-Jul), Col 1 = Merchant, Col 2 = Category, Col 3 = Amount ($79.82)
-      // Pattern 2 (Standard CSV): Col 0 = Date, Col 1 = Merchant, Col 2 = Amount, Col 3 = Category
-      let datePart = parts[0];
-      let merchantPart = parts[1] || 'Unknown Merchant';
+      let datePart = '';
+      let merchantPart = '';
       let catPart = '';
       let amountPart = '';
+      let whoPart = '';
 
-      // Check remaining columns for amount ($ or numbers)
-      const findAmountIndex = parts.findIndex((p, idx) => idx > 0 && /^\$?\s*[+-]?\d[\d,]*(\.\d{1,2})?$/.test(p.trim()));
-      
-      if (findAmountIndex !== -1) {
-        amountPart = parts[findAmountIndex];
-        // If amount was at index 3, index 2 is category!
-        if (findAmountIndex === 3) {
-          catPart = parts[2] || '';
-          merchantPart = parts[1] || merchantPart;
-        } else if (findAmountIndex === 2) {
-          merchantPart = parts[1] || merchantPart;
-          catPart = parts[3] || '';
-        } else if (findAmountIndex === 1) {
-          // Amount was first, merchant is 2
-          merchantPart = parts[2] || merchantPart;
-          catPart = parts[3] || '';
-        }
+      if (mapping.hasHeaders) {
+        if (mapping.dateIdx !== -1 && parts[mapping.dateIdx] !== undefined) datePart = parts[mapping.dateIdx];
+        if (mapping.descIdx !== -1 && parts[mapping.descIdx] !== undefined) merchantPart = parts[mapping.descIdx];
+        if (mapping.catIdx !== -1 && parts[mapping.catIdx] !== undefined) catPart = parts[mapping.catIdx];
+        if (mapping.amtIdx !== -1 && parts[mapping.amtIdx] !== undefined) amountPart = parts[mapping.amtIdx];
+        if (mapping.whoIdx !== -1 && parts[mapping.whoIdx] !== undefined) whoPart = parts[mapping.whoIdx];
       } else {
-        // Fallback guess: Col 2 is amount, or Col 3 is amount
-        if (parts[3] && /[\d.]/.test(parts[3])) {
-          catPart = parts[2];
-          amountPart = parts[3];
-        } else {
+        // Dynamic heuristic fallback when no explicit headers are present
+        datePart = parts[0] || '';
+
+        // Find index of column containing amount (contains currency sign or numeric price)
+        const amtIdx = parts.findIndex(
+          (p, idx) => idx > 0 && /^\$?\s*[+-]?\d[\d,]*(\.\d{1,2})?\s*\$?$/.test(p.trim())
+        );
+
+        if (amtIdx === 3) {
+          merchantPart = parts[1] || 'Unknown Merchant';
+          catPart = parts[2] || '';
+          amountPart = parts[3] || '0';
+          whoPart = parts[4] || '';
+        } else if (amtIdx === 2) {
+          merchantPart = parts[1] || 'Unknown Merchant';
           amountPart = parts[2] || '0';
           catPart = parts[3] || '';
+          whoPart = parts[4] || '';
+        } else if (amtIdx === 1) {
+          amountPart = parts[1] || '0';
+          merchantPart = parts[2] || 'Unknown Merchant';
+          catPart = parts[3] || '';
+          whoPart = parts[4] || '';
+        } else {
+          merchantPart = parts[1] || 'Unknown Merchant';
+          catPart = parts[2] || '';
+          amountPart = parts[3] || parts[2] || '0';
+          whoPart = parts[4] || '';
         }
       }
 
-      // Clean amount
-      const cleanAmt = parseFloat(amountPart.replace(/[^0-9.-]/g, '')) || 0;
+      // Handle currency signs ($), commas in numbers, CAD prefix
+      const cleanAmtStr = amountPart.replace(/[$CAD,\s]/gi, '');
+      const cleanAmt = parseFloat(cleanAmtStr) || 0;
       const amount = Math.abs(cleanAmt);
 
       // Clean and normalize date into ISO YYYY-MM-DD
       const cleanDate = normalizeDateToIso(datePart, targetYear);
 
       // Map category
-      const assignedCategory = mapSpreadsheetCategory(catPart, merchantPart, amount);
+      const cleanMerchant = (merchantPart || 'Unknown Merchant').trim();
+      const assignedCategory = mapSpreadsheetCategory(catPart, cleanMerchant, amount);
+
+      // Cardholder / Who extraction (e.g. Bunny or Monkey)
+      let partner: 'bunny' | 'monkey' = partnerChoice;
+      const whoCandidate = whoPart || parts.find((p) => /^(bunny|monkey|b|m)$/i.test(p.trim())) || '';
+      if (whoCandidate) {
+        const w = whoCandidate.toLowerCase().trim();
+        if (w.includes('monkey') || w === 'm') {
+          partner = 'monkey';
+        } else if (w.includes('bunny') || w === 'b') {
+          partner = 'bunny';
+        }
+      }
 
       newItems.push({
         id: `tx-parsed-${Date.now()}-${index}`,
         date: cleanDate,
         statementPeriod: statementPeriodChoice,
-        merchant: merchantPart,
+        merchant: cleanMerchant,
         rawCategory: catPart,
         assignedCategory,
         amount,
-        partner: selectedPartnerDefault,
+        partner,
         carbonEstimateKg: 0,
         ecoCategory: 'Neutral',
       });
@@ -576,7 +713,7 @@ export function StatementParserModule({
   };
 
   // Update single parsed item partner
-  const handleUpdateParsedPartner = (id: string, partner: 'bunny' | 'monkey' | 'joint') => {
+  const handleUpdateParsedPartner = (id: string, partner: 'bunny' | 'monkey') => {
     setParsedItems((prev) =>
       prev.map((i) => (i.id === id ? { ...i, partner } : i))
     );
@@ -748,6 +885,10 @@ export function StatementParserModule({
       if (categoryFilter !== 'all' && tx.assignedCategory !== categoryFilter) {
         return false;
       }
+      // Cardholder filter (Bunny / Monkey)
+      if (partnerFilter !== 'all' && tx.partner !== partnerFilter) {
+        return false;
+      }
       // Search term
       if (searchTerm.trim()) {
         const q = searchTerm.toLowerCase();
@@ -915,12 +1056,6 @@ export function StatementParserModule({
                   {formatCurrency(actualsSummary.periodByPartner.monkey)}
                 </span>
               </div>
-              <div className="flex justify-between items-center">
-                <span className="text-slate-400">💳 Joint:</span>
-                <span className="font-mono font-semibold text-indigo-300">
-                  {formatCurrency(actualsSummary.periodByPartner.joint)}
-                </span>
-              </div>
             </div>
           </div>
 
@@ -940,12 +1075,6 @@ export function StatementParserModule({
                 <span className="text-slate-400">🐵 Monkey YTD:</span>
                 <span className="font-mono font-semibold text-teal-300">
                   {formatCurrency(actualsSummary.ytdByPartner.monkey)}
-                </span>
-              </div>
-              <div className="flex justify-between items-center">
-                <span className="text-slate-400">💳 Joint YTD:</span>
-                <span className="font-mono font-semibold text-indigo-300">
-                  {formatCurrency(actualsSummary.ytdByPartner.joint)}
                 </span>
               </div>
             </div>
@@ -996,23 +1125,6 @@ export function StatementParserModule({
             <p className="text-xs 2xl:text-sm text-slate-400">
               Paste credit card statement rows from Google Sheets or drop a CSV file to auto-categorize and assign to your statement period.
             </p>
-          </div>
-
-          <div className="flex items-center gap-2">
-            <button
-              id="btn-load-sample-august"
-              onClick={() => {
-                setUploadMonth('08');
-                setUploadYearInput('2026');
-                setRawText(SAMPLE_AUGUST_STATEMENT);
-                handleParseText(SAMPLE_AUGUST_STATEMENT, '2026-08', selectedPartnerDefault);
-              }}
-              className="flex items-center space-x-1.5 text-xs 2xl:text-sm text-indigo-300 hover:text-indigo-200 bg-indigo-500/20 hover:bg-indigo-500/30 border border-indigo-500/30 px-3 2xl:px-4 py-1.5 2xl:py-2 rounded-xl transition-all shadow-sm"
-              title="Loads the 26 August Statement transactions (FreshCo, Petro-Canada, T&T, Pembridge, etc.)"
-            >
-              <Sparkles className="w-3.5 h-3.5 2xl:w-4 2xl:h-4 text-amber-300" />
-              <span>Load Sample August Statement</span>
-            </button>
           </div>
         </div>
 
@@ -1400,6 +1512,17 @@ export function StatementParserModule({
                 </option>
               ))}
             </select>
+
+            <select
+              id="partner-filter-select"
+              value={partnerFilter}
+              onChange={(e) => setPartnerFilter(e.target.value as 'all' | 'bunny' | 'monkey')}
+              className="px-2.5 2xl:px-3 py-1.5 2xl:py-2 rounded-xl border border-white/15 bg-slate-900 text-slate-200 text-xs 2xl:text-sm font-semibold focus:outline-hidden"
+            >
+              <option value="all">All Cardholders</option>
+              <option value="bunny">🐰 Bunny Only</option>
+              <option value="monkey">🐵 Monkey Only</option>
+            </select>
           </div>
         </div>
 
@@ -1455,16 +1578,10 @@ export function StatementParserModule({
                           className={`px-2.5 py-0.5 rounded-full text-[10px] 2xl:text-xs font-semibold border ${
                             tx.partner === 'bunny'
                               ? 'bg-rose-500/20 border-rose-500/30 text-rose-300'
-                              : tx.partner === 'monkey'
-                              ? 'bg-teal-500/20 border-teal-500/30 text-teal-300'
-                              : 'bg-white/10 border-white/15 text-slate-300'
+                              : 'bg-teal-500/20 border-teal-500/30 text-teal-300'
                           }`}
                         >
-                          {tx.partner === 'bunny'
-                            ? '🐰 Bunny'
-                            : tx.partner === 'monkey'
-                            ? '🐵 Monkey'
-                            : '💳 Joint'}
+                          {tx.partner === 'bunny' ? '🐰 Bunny' : '🐵 Monkey'}
                         </span>
                       </td>
                       <td className="py-3 2xl:py-3.5 px-3 2xl:px-4">

@@ -25,6 +25,9 @@ import {
   Plane,
   Sparkles,
   RefreshCw,
+  X,
+  Sliders,
+  Check,
 } from 'lucide-react';
 import {
   ResponsiveContainer,
@@ -37,7 +40,7 @@ import {
   CartesianGrid,
   Cell,
 } from 'recharts';
-import { HouseholdState, CategoryBudgetVsActual } from '../types';
+import { HouseholdState, CategoryBudgetVsActual, HouseholdExpense } from '../types';
 import {
   calculateBudgetVsActuals,
   formatCurrency,
@@ -48,8 +51,11 @@ import {
 import {
   mapRowToExpense,
   mapRowToTransaction,
+  mapExpenseToRow,
+  insertOrUpdateExpenseInSupabase,
 } from '../services/supabaseService';
 import { supabase, isSupabaseConfigured } from '../lib/supabase';
+import { saveHouseholdState } from '../utils/storage';
 
 interface BudgetVsActualsDashboardProps {
   state: HouseholdState;
@@ -73,6 +79,20 @@ const CATEGORY_ICONS: Record<string, React.ReactNode> = {
   Uncategorized: <Receipt className="w-4 h-4 text-slate-400" />,
 };
 
+const STANDARD_BUDGET_CATEGORIES = [
+  { key: 'Groceries', label: 'Groceries & Household Staples', defaultBudget: 1300, color: '#10b981' },
+  { key: 'Dining', label: 'Dining Out, Date Nights & Coffee', defaultBudget: 650, color: '#f43f5e' },
+  { key: 'Housing', label: 'Housing, Mortgage & Property Tax', defaultBudget: 3930, color: '#ec4899' },
+  { key: 'Childcare', label: 'Childcare, Montessori & Lessons', defaultBudget: 2030, color: '#8b5cf6' },
+  { key: 'Utilities', label: 'Utilities (Hydro, Gas, Water)', defaultBudget: 285, color: '#06b6d4' },
+  { key: 'Subscriptions', label: 'Telecom, Gigabit & Streaming', defaultBudget: 290, color: '#6366f1' },
+  { key: 'Transport', label: 'Auto Insurance, EV Loan & Fuel', defaultBudget: 760, color: '#3b82f6' },
+  { key: 'Debt', label: 'Debt & Vehicle Financing', defaultBudget: 450, color: '#f97316' },
+  { key: 'Insurance', label: 'Life & Critical Illness Insurance', defaultBudget: 340, color: '#a855f7' },
+  { key: 'Travel', label: 'Travel & Vacation Spending', defaultBudget: 500, color: '#14b8a6' },
+  { key: 'Discretionary', label: 'Personal Discretionary (Bunny & Monkey)', defaultBudget: 400, color: '#eab308' },
+];
+
 export function BudgetVsActualsDashboard({
   state,
   onNavigateToStatements,
@@ -82,6 +102,12 @@ export function BudgetVsActualsDashboard({
   const [isSyncing, setIsSyncing] = useState(false);
   const [syncStatus, setSyncStatus] = useState<string | null>(null);
   const [syncError, setSyncError] = useState<string | null>(null);
+
+  // Budget Limits Editor Modal State
+  const [isBudgetLimitsModalOpen, setIsBudgetLimitsModalOpen] = useState(false);
+  const [categoryMonthlyLimits, setCategoryMonthlyLimits] = useState<Record<string, number>>({});
+  const [isSavingLimits, setIsSavingLimits] = useState(false);
+  const [limitsSavedMessage, setLimitsSavedMessage] = useState<string | null>(null);
 
   const syncFromSupabase = async () => {
     if (!isSupabaseConfigured() || !onUpdateState) return;
@@ -218,6 +244,124 @@ export function BudgetVsActualsDashboard({
     annualTargetBudget > 0 ? (annualTargetActual / annualTargetBudget) * 100 : 0;
   const annualTargetRemaining = annualTargetBudget - annualTargetActual;
   const yearElapsedPercent = (comparison.elapsedMonths / 12) * 100;
+
+  // Budget Limits Editor Helpers
+  const openBudgetLimitsModal = () => {
+    const currentLimits: Record<string, number> = {};
+    STANDARD_BUDGET_CATEGORIES.forEach((cat) => {
+      const foundComp = comparison?.categories?.find((c) => c.category === cat.key);
+      if (foundComp && foundComp.monthlyBudget > 0) {
+        currentLimits[cat.key] = foundComp.monthlyBudget;
+      } else {
+        const catExpenses = state.expenses.filter((e) => e.category === cat.key);
+        if (catExpenses.length > 0) {
+          currentLimits[cat.key] = catExpenses.reduce((sum, e) => sum + (e.monthlyAmount || 0), 0);
+        } else {
+          currentLimits[cat.key] = cat.defaultBudget;
+        }
+      }
+    });
+    setCategoryMonthlyLimits(currentLimits);
+    setLimitsSavedMessage(null);
+    setIsBudgetLimitsModalOpen(true);
+  };
+
+  const handleMonthlyLimitChange = (catKey: string, valueStr: string) => {
+    const val = parseFloat(valueStr);
+    setCategoryMonthlyLimits((prev) => ({
+      ...prev,
+      [catKey]: isNaN(val) ? 0 : Math.max(0, val),
+    }));
+  };
+
+  const handleAnnualLimitChange = (catKey: string, valueStr: string) => {
+    const val = parseFloat(valueStr);
+    const monthlyVal = isNaN(val) ? 0 : Math.max(0, Math.round((val / 12) * 100) / 100);
+    setCategoryMonthlyLimits((prev) => ({
+      ...prev,
+      [catKey]: monthlyVal,
+    }));
+  };
+
+  const handleSaveBudgetLimits = async () => {
+    setIsSavingLimits(true);
+    try {
+      let updatedExpenses = [...state.expenses];
+
+      // Update or insert expense records for each category
+      for (const [catKey, rawMonthly] of Object.entries(categoryMonthlyLimits)) {
+        const newMonthly = Number(rawMonthly) || 0;
+        const matching = updatedExpenses.filter((e) => e.category === catKey);
+        if (matching.length === 1) {
+          updatedExpenses = updatedExpenses.map((e) =>
+            e.id === matching[0].id ? { ...e, monthlyAmount: Math.max(0, newMonthly) } : e
+          );
+        } else if (matching.length > 1) {
+          const currentSum = matching.reduce((sum, e) => sum + (e.monthlyAmount || 0), 0);
+          if (currentSum > 0) {
+            const ratio = newMonthly / currentSum;
+            updatedExpenses = updatedExpenses.map((e) => {
+              if (e.category === catKey) {
+                return { ...e, monthlyAmount: Math.max(0, Math.round(e.monthlyAmount * ratio)) };
+              }
+              return e;
+            });
+          } else {
+            updatedExpenses = updatedExpenses.map((e) =>
+              e.id === matching[0].id ? { ...e, monthlyAmount: Math.max(0, newMonthly) } : e
+            );
+          }
+        } else {
+          const catConfig = STANDARD_BUDGET_CATEGORIES.find((c) => c.key === catKey);
+          const newExp: HouseholdExpense = {
+            id: `exp-${catKey.toLowerCase()}-${Date.now()}`,
+            title: catConfig?.label || `${catKey} Target`,
+            category: catKey as any,
+            isFixed: false,
+            monthlyAmount: Math.max(0, newMonthly),
+            splitMethod: 'proportional',
+            notes: 'Adjusted in Budget Limits Manager',
+          };
+          updatedExpenses.push(newExp);
+        }
+      }
+
+      // Update local state in memory
+      if (onUpdateState) {
+        onUpdateState((prev) => ({
+          ...prev,
+          expenses: updatedExpenses,
+        }));
+      }
+
+      // Persist directly to Supabase
+      if (isSupabaseConfigured()) {
+        try {
+          const rows = updatedExpenses.map(mapExpenseToRow);
+          const { error } = await supabase.from('expenses').upsert(rows, { onConflict: 'id' });
+          if (error) {
+            console.warn('[Supabase Expenses Upsert Fallback]:', error);
+            for (const exp of updatedExpenses) {
+              await insertOrUpdateExpenseInSupabase(exp).catch(console.error);
+            }
+          }
+        } catch (dbErr) {
+          console.error('Supabase DB Update Error:', dbErr);
+        }
+      }
+
+      await saveHouseholdState({ ...state, expenses: updatedExpenses });
+      setLimitsSavedMessage('✓ Budget limits successfully updated & synced to database!');
+      setTimeout(() => {
+        setLimitsSavedMessage(null);
+        setIsBudgetLimitsModalOpen(false);
+      }, 1100);
+    } catch (err) {
+      console.error('Error saving budget limits:', err);
+    } finally {
+      setIsSavingLimits(false);
+    }
+  };
 
   return (
     <div className="space-y-8 pb-16">
@@ -498,16 +642,6 @@ export function BudgetVsActualsDashboard({
                   )}
                 </span>
               </div>
-              <div className="flex justify-between items-center">
-                <span className="text-slate-400">💳 Joint Cards:</span>
-                <span className="font-mono font-semibold text-indigo-300">
-                  {formatCurrency(
-                    viewScope === 'ytd'
-                      ? comparison.overall.ytdByPartner.joint
-                      : comparison.overall.periodByPartner.joint
-                  )}
-                </span>
-              </div>
             </div>
           </div>
 
@@ -622,11 +756,12 @@ export function BudgetVsActualsDashboard({
           <div className="flex items-center space-x-2">
             <button
               id="adjust-budget-btn"
-              onClick={onNavigateToBudget}
-              className="text-xs 2xl:text-sm text-indigo-300 hover:text-white px-3 2xl:px-4 py-1.5 2xl:py-2 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 transition-colors flex items-center space-x-1 cursor-pointer"
+              onClick={openBudgetLimitsModal}
+              className="text-xs 2xl:text-sm text-indigo-300 hover:text-white px-3 2xl:px-4 py-1.5 2xl:py-2 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 transition-colors flex items-center space-x-1.5 cursor-pointer shadow-xs"
+              title="Open category budget limits editor"
             >
+              <Sliders className="w-3.5 h-3.5 2xl:w-4 2xl:h-4 text-indigo-400" />
               <span>Adjust Budget Limits</span>
-              <ArrowRight className="w-3 h-3 2xl:w-4 2xl:h-4" />
             </button>
             <button
               id="upload-statements-btn"
@@ -796,9 +931,7 @@ export function BudgetVsActualsDashboard({
                                     <span className="text-[10px] text-slate-300 font-sans">
                                       {tx.partner === 'bunny'
                                         ? '🐰 Bunny'
-                                        : tx.partner === 'monkey'
-                                        ? '🐵 Monkey'
-                                        : '💳 Joint'}
+                                        : '🐵 Monkey'}
                                     </span>
                                   </td>
                                   <td className="py-2 px-3 text-right font-bold text-white">
@@ -817,6 +950,181 @@ export function BudgetVsActualsDashboard({
           })}
         </div>
       </div>
+
+      {/* 5. Category Budget Limits Editor Modal */}
+      {isBudgetLimitsModalOpen && (
+        <div
+          id="budget-limits-modal"
+          className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-6 bg-slate-950/80 backdrop-blur-md overflow-y-auto"
+        >
+          <div className="relative w-full max-w-4xl bg-slate-900/95 border border-white/15 rounded-2xl sm:rounded-3xl shadow-2xl shadow-black/80 flex flex-col max-h-[92vh] overflow-hidden">
+            {/* Modal Header */}
+            <div className="flex items-center justify-between px-6 py-5 border-b border-white/10 bg-white/5">
+              <div className="flex items-center space-x-3">
+                <span className="p-2.5 rounded-xl bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">
+                  <Sliders className="w-5 h-5" />
+                </span>
+                <div>
+                  <h3 className="text-base sm:text-lg font-bold text-white">
+                    Adjust Category Budget Limits
+                  </h3>
+                  <p className="text-xs text-slate-400">
+                    Enter either a Monthly or Annual target. Cross-values calculate automatically and persist directly to Supabase.
+                  </p>
+                </div>
+              </div>
+              <button
+                id="close-budget-limits-modal-btn"
+                onClick={() => setIsBudgetLimitsModalOpen(false)}
+                className="p-2 rounded-xl text-slate-400 hover:text-white hover:bg-white/10 transition-colors cursor-pointer"
+                title="Close editor"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Notification Banner if Saved */}
+            {limitsSavedMessage && (
+              <div className="px-6 py-3 bg-emerald-500/15 border-b border-emerald-500/30 text-emerald-300 flex items-center space-x-2 text-xs font-semibold">
+                <Check className="w-4 h-4 text-emerald-400 shrink-0" />
+                <span>{limitsSavedMessage}</span>
+              </div>
+            )}
+
+            {/* Modal Body / Category Table */}
+            <div className="p-6 overflow-y-auto space-y-3 divide-y divide-white/5">
+              <div className="grid grid-cols-12 gap-3 pb-2 text-[11px] font-bold uppercase tracking-wider text-slate-400 px-3">
+                <span className="col-span-5 sm:col-span-6">Category</span>
+                <span className="col-span-4 sm:col-span-3 text-right">Monthly Limit ($ CAD)</span>
+                <span className="col-span-3 sm:col-span-3 text-right">Annual Limit ($ CAD)</span>
+              </div>
+
+              {STANDARD_BUDGET_CATEGORIES.map((cat) => {
+                const monthlyVal =
+                  categoryMonthlyLimits[cat.key] !== undefined
+                    ? categoryMonthlyLimits[cat.key]
+                    : cat.defaultBudget;
+                const annualVal = Math.round(monthlyVal * 12);
+                const foundComp = comparison?.categories?.find((c) => c.category === cat.key);
+
+                return (
+                  <div
+                    key={cat.key}
+                    className="grid grid-cols-12 gap-3 items-center pt-3.5 pb-1 px-3 hover:bg-white/[0.02] rounded-xl transition-colors"
+                  >
+                    {/* Category Label + Icon */}
+                    <div className="col-span-5 sm:col-span-6 flex items-center space-x-3">
+                      <span className="p-2 rounded-lg bg-white/5 border border-white/10 shrink-0">
+                        {CATEGORY_ICONS[cat.key] || <Receipt className="w-4 h-4 text-slate-400" />}
+                      </span>
+                      <div className="min-w-0">
+                        <span className="text-xs sm:text-sm font-semibold text-slate-100 block truncate">
+                          {cat.label}
+                        </span>
+                        {foundComp && (
+                          <span className="text-[10px] text-slate-400 font-mono">
+                            Actual: {formatCurrency(foundComp.periodActual)} / mo
+                          </span>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Monthly Input */}
+                    <div className="col-span-4 sm:col-span-3">
+                      <div className="relative">
+                        <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-xs text-slate-400 font-mono">
+                          $
+                        </span>
+                        <input
+                          id={`input-monthly-${cat.key.toLowerCase()}`}
+                          type="number"
+                          min="0"
+                          step="10"
+                          value={monthlyVal}
+                          onChange={(e) => handleMonthlyLimitChange(cat.key, e.target.value)}
+                          className="w-full pl-6 pr-2.5 py-1.5 rounded-lg bg-slate-950/60 border border-white/15 text-slate-100 font-mono text-xs sm:text-sm text-right focus:border-indigo-400 focus:outline-hidden focus:ring-1 focus:ring-indigo-400"
+                        />
+                      </div>
+                    </div>
+
+                    {/* Annual Input (cross-calculated) */}
+                    <div className="col-span-3 sm:col-span-3">
+                      <div className="relative">
+                        <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-xs text-slate-400 font-mono">
+                          $
+                        </span>
+                        <input
+                          id={`input-annual-${cat.key.toLowerCase()}`}
+                          type="number"
+                          min="0"
+                          step="100"
+                          value={annualVal}
+                          onChange={(e) => handleAnnualLimitChange(cat.key, e.target.value)}
+                          className="w-full pl-6 pr-2.5 py-1.5 rounded-lg bg-slate-950/60 border border-white/15 text-slate-100 font-mono text-xs sm:text-sm text-right focus:border-indigo-400 focus:outline-hidden focus:ring-1 focus:ring-indigo-400"
+                        />
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* Modal Footer */}
+            <div className="px-6 py-4 border-t border-white/10 bg-white/5 flex flex-col sm:flex-row items-center justify-between gap-4">
+              <div className="flex items-center space-x-4 text-xs">
+                <div>
+                  <span className="text-slate-400 block text-[10px] uppercase font-semibold">Total Monthly Target</span>
+                  <span className="font-mono font-bold text-white text-sm">
+                    {formatCurrency(
+                      (Object.values(categoryMonthlyLimits) as number[]).reduce((sum, v) => sum + (Number(v) || 0), 0)
+                    )}
+                    /mo
+                  </span>
+                </div>
+                <div className="h-6 w-px bg-white/10" />
+                <div>
+                  <span className="text-slate-400 block text-[10px] uppercase font-semibold">Total Annual Target</span>
+                  <span className="font-mono font-bold text-indigo-300 text-sm">
+                    {formatCurrency(
+                      (Object.values(categoryMonthlyLimits) as number[]).reduce((sum, v) => sum + (Number(v) || 0), 0) * 12
+                    )}
+                    /yr
+                  </span>
+                </div>
+              </div>
+
+              <div className="flex items-center space-x-3 w-full sm:w-auto justify-end">
+                <button
+                  id="cancel-budget-limits-btn"
+                  onClick={() => setIsBudgetLimitsModalOpen(false)}
+                  disabled={isSavingLimits}
+                  className="px-4 py-2 text-xs font-semibold text-slate-300 hover:text-white rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 transition-colors cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  id="save-budget-limits-btn"
+                  onClick={handleSaveBudgetLimits}
+                  disabled={isSavingLimits}
+                  className="flex items-center space-x-1.5 px-4 py-2 text-xs font-semibold text-white rounded-xl bg-indigo-600 hover:bg-indigo-500 shadow-md transition-all cursor-pointer disabled:opacity-50"
+                >
+                  {isSavingLimits ? (
+                    <>
+                      <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                      <span>Saving to Supabase...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Check className="w-3.5 h-3.5 text-indigo-200" />
+                      <span>Save &amp; Persist Limits</span>
+                    </>
+                  )}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

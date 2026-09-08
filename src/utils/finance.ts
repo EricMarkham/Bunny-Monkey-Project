@@ -581,14 +581,33 @@ const MONTH_ABBR_MAP: Record<string, number> = {
  */
 export function normalizeDateToIso(rawDate: string, defaultYear: number = 2026): string {
   if (!rawDate) return `${defaultYear}-08-01`;
-  const trimmed = rawDate.trim();
+  let trimmed = rawDate.trim().replace(/^["']|["']$/g, '');
+  // If date contains timestamp (e.g. "2026-08-15 14:22:00" or "08/15/2026 12:00 AM"), take the date portion
+  if (/\s+\d{1,2}:\d{2}/.test(trimmed)) {
+    trimmed = trimmed.split(/\s+/)[0];
+  }
 
   // Already standard ISO YYYY-MM-DD
   if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) {
     return trimmed;
   }
 
-  // DD-MMM (e.g. "24-Jul", "01-Aug", "7-Aug")
+  // Handle "Jul 24, 2026" or "July 24 2026"
+  const cleanedTextDate = trimmed.replace(/,/g, '');
+  const mmmDdYyyyMatch = cleanedTextDate.match(/^([A-Za-z]{3,9})\s+(\d{1,2})(?:\s+(\d{2,4}))?$/);
+  if (mmmDdYyyyMatch) {
+    const monthKey = mmmDdYyyyMatch[1].toLowerCase();
+    const month = MONTH_ABBR_MAP[monthKey] || 8;
+    const day = parseInt(mmmDdYyyyMatch[2], 10);
+    let year = defaultYear;
+    if (mmmDdYyyyMatch[3]) {
+      const yr = parseInt(mmmDdYyyyMatch[3], 10);
+      year = yr < 100 ? 2000 + yr : yr;
+    }
+    return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+  }
+
+  // DD-MMM (e.g. "24-Jul", "01-Aug", "7-Aug", "24-Jul-2026")
   const ddMmmMatch = trimmed.match(/^(\d{1,2})[-/\s]([A-Za-z]{3,9})(?:[-/\s](\d{2,4}))?$/);
   if (ddMmmMatch) {
     const day = parseInt(ddMmmMatch[1], 10);
@@ -795,40 +814,50 @@ export function calculatePeriodAndYtdActuals(
     const amount = Number(tx.amount) || 0;
     const cat = tx.assignedCategory || 'Uncategorized';
 
-    // Check statement period match
-    const txPeriod = tx.statementPeriod || (tx.date && tx.date.length >= 7 ? tx.date.slice(0, 7) : '2026-09');
+    // Derive transaction year and month from statementPeriod first, then fallback to date
     let txY = NaN;
     let txM = NaN;
-    if (txPeriod && /^\d{4}-\d{2}/.test(txPeriod)) {
-      const parts = txPeriod.split('-');
-      txY = parseInt(parts[0], 10);
-      txM = parseInt(parts[1], 10);
-    } else if (tx.date && /^\d{4}-\d{2}/.test(tx.date)) {
-      const parts = tx.date.split('-');
+    if (tx.statementPeriod && /^\d{4}-\d{2}/.test(tx.statementPeriod)) {
+      const parts = tx.statementPeriod.split('-');
       txY = parseInt(parts[0], 10);
       txM = parseInt(parts[1], 10);
     }
+    if (isNaN(txY) || isNaN(txM)) {
+      if (tx.date && /^\d{4}-\d{2}/.test(tx.date)) {
+        const parts = tx.date.split('-');
+        txY = parseInt(parts[0], 10);
+        txM = parseInt(parts[1], 10);
+      }
+    }
 
     // Is this transaction in the selected statement period?
-    const inPeriod = isAll ? true : (txPeriod === periodId);
+    const inPeriod = isAll
+      ? true
+      : (tx.statementPeriod === periodId || (!tx.statementPeriod && tx.date && tx.date.startsWith(periodId)));
     if (inPeriod) {
       periodTransactions.push(tx);
       periodTotal += amount;
-      if (tx.partner === 'bunny') periodByPartner.bunny += amount;
-      else if (tx.partner === 'monkey') periodByPartner.monkey += amount;
-      else periodByPartner.joint += amount;
+      if (tx.partner === 'bunny') {
+        periodByPartner.bunny += amount;
+      } else {
+        periodByPartner.monkey += amount;
+      }
 
       periodByCategory[cat] = (periodByCategory[cat] || 0) + amount;
     }
 
     // Is this transaction Year-To-Date (same calendar year, up to and including target statement month)?
-    const inYtd = isAll ? true : (!isNaN(txY) && !isNaN(txM) ? (txY === targetYear && txM <= targetMonth) : true);
+    const inYtd = isAll
+      ? true
+      : (!isNaN(txY) && !isNaN(txM) ? (txY === targetYear && txM >= 1 && txM <= targetMonth) : false);
     if (inYtd) {
       ytdTransactions.push(tx);
       ytdTotal += amount;
-      if (tx.partner === 'bunny') ytdByPartner.bunny += amount;
-      else if (tx.partner === 'monkey') ytdByPartner.monkey += amount;
-      else ytdByPartner.joint += amount;
+      if (tx.partner === 'bunny') {
+        ytdByPartner.bunny += amount;
+      } else {
+        ytdByPartner.monkey += amount;
+      }
 
       ytdByCategory[cat] = (ytdByCategory[cat] || 0) + amount;
     }
