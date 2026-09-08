@@ -817,15 +817,17 @@ export async function insertOrUpdateExpenseInSupabase(
       console.error("Expense Save Error:", upsertError);
 
       // Fallback: If upsert failed, attempt update by 'id'
-      const { error: updateError } = await supabase
+      const { data: updateData, error: updateError } = await supabase
         .from('expenses')
         .update(payload)
-        .eq('id', payload.id);
+        .eq('id', payload.id)
+        .select();
 
-      if (updateError) {
-        console.error("Expense Save Error:", updateError);
-
-        // Fallback: If update failed because record does not exist yet, attempt insert
+      if (updateError || !updateData || updateData.length === 0) {
+        if (updateError) {
+          console.error("Expense Save Error:", updateError);
+        }
+        // Fallback: If update matched 0 rows or failed, attempt insert
         const { error: insertError } = await supabase
           .from('expenses')
           .insert(payload);

@@ -49,6 +49,7 @@ import {
   mapExpenseToRow,
   mapSinkingFundToRow,
   setKnownExpenseColumns,
+  SupabaseExpenseRow,
 } from '../services/supabaseService';
 import { supabase, isSupabaseConfigured } from '../lib/supabase';
 
@@ -279,7 +280,22 @@ export function BudgetModule({
     // Immediately persist expense directly to Supabase with exact schema mapping and error handling
     try {
       if (isSupabaseConfigured()) {
-        await insertOrUpdateExpenseInSupabase(newExpense, state.partners);
+        const payload: SupabaseExpenseRow = mapExpenseToRow(newExpense, state.partners);
+        const { error: upsertError } = await supabase
+          .from('expenses')
+          .upsert(payload, { onConflict: 'id' });
+
+        if (upsertError) {
+          console.error("Expense Save Error:", upsertError);
+          // Fallback: If upsert constraint fails, attempt direct insert
+          const { error: insertError } = await supabase
+            .from('expenses')
+            .insert(payload);
+          if (insertError) {
+            console.error("Expense Save Error:", insertError);
+            throw insertError;
+          }
+        }
         setSyncStatus('✓ Recurring bill saved to Supabase');
         setTimeout(() => setSyncStatus(null), 3000);
         setDbError(null);
@@ -306,7 +322,14 @@ export function BudgetModule({
     // Immediately execute database delete query in Supabase
     try {
       if (isSupabaseConfigured()) {
-        await deleteExpenseFromSupabase(id);
+        const { error: deleteError } = await supabase
+          .from('expenses')
+          .delete()
+          .eq('id', id);
+        if (deleteError) {
+          console.error("Expense Save Error:", deleteError);
+          throw deleteError;
+        }
         setSyncStatus('✓ Expense deleted from Supabase');
         setTimeout(() => setSyncStatus(null), 3000);
         setDbError(null);
@@ -361,7 +384,23 @@ export function BudgetModule({
     // Immediately persist updated expense directly to Supabase with exact schema mapping and error handling
     try {
       if (isSupabaseConfigured()) {
-        await insertOrUpdateExpenseInSupabase(updatedExpense, state.partners);
+        const payload: SupabaseExpenseRow = mapExpenseToRow(updatedExpense, state.partners);
+        const { error: upsertError } = await supabase
+          .from('expenses')
+          .upsert(payload, { onConflict: 'id' });
+
+        if (upsertError) {
+          console.error("Expense Save Error:", upsertError);
+          // Fallback: If upsert constraint fails, attempt direct update
+          const { error: updateError } = await supabase
+            .from('expenses')
+            .update(payload)
+            .eq('id', payload.id);
+          if (updateError) {
+            console.error("Expense Save Error:", updateError);
+            throw updateError;
+          }
+        }
         setSyncStatus('✓ Expense updated in Supabase');
         setTimeout(() => setSyncStatus(null), 3000);
         setDbError(null);
