@@ -6,8 +6,6 @@ import {
   Partner,
   SinkingFund,
   StatementTransaction,
-  TripExpense,
-  TripSettlement,
 } from '../types';
 
 export const USD_TO_CAD_RATE = 1.36;
@@ -183,240 +181,6 @@ export function calculateBudgetSummary(
     totalHouseholdFreeCash,
     savingsRatePercent:
       totalNet > 0 ? ((totalMonthlySinkingCommitment + Math.max(0, totalHouseholdFreeCash)) / totalNet) * 100 : 0,
-  };
-}
-
-/**
- * Trip & Vacation Tracking Engine (Sinking Fund funded, no debt repayment between partners)
- */
-export interface TripTrackingSummary {
-  totalTripSpend: number;
-  paidByBunny: number;
-  paidByMonkey: number;
-  paidByJoint: number;
-  paidBySinkingFund: number;
-  totalCoveredBySinkingFund: number;
-  outOfPocketTotal: number;
-  categoryBreakdown: Record<string, number>;
-  vacationFund?: SinkingFund;
-  vacationFundBalance: number;
-  vacationFundRemainingAfterTrip: number;
-  expensesCount: number;
-}
-
-export function calculateTripTracking(
-  tripId: string,
-  expenses: TripExpense[],
-  sinkingFunds: SinkingFund[] = []
-): TripTrackingSummary {
-  const tripExpenses = (expenses || []).filter((e) => e.tripId === tripId);
-
-  let totalTripSpend = 0;
-  let paidByBunny = 0;
-  let paidByMonkey = 0;
-  let paidByJoint = 0;
-  let paidBySinkingFund = 0;
-  let totalCoveredBySinkingFund = 0;
-
-  const categoryBreakdown: Record<string, number> = {
-    Flights: 0,
-    Hotel: 0,
-    Dining: 0,
-    Transit: 0,
-    Activities: 0,
-    Shopping: 0,
-    Misc: 0,
-  };
-
-  tripExpenses.forEach((exp) => {
-    totalTripSpend += exp.totalCost;
-    categoryBreakdown[exp.category] = (categoryBreakdown[exp.category] || 0) + exp.totalCost;
-
-    if (exp.paidBy === 'bunny') paidByBunny += exp.totalCost;
-    else if (exp.paidBy === 'monkey') paidByMonkey += exp.totalCost;
-    else if (exp.paidBy === 'joint') paidByJoint += exp.totalCost;
-    else if (exp.paidBy === 'sinking_fund') paidBySinkingFund += exp.totalCost;
-
-    if (exp.fundedBySinkingFund || exp.paidBy === 'sinking_fund') {
-      totalCoveredBySinkingFund += exp.totalCost;
-    }
-  });
-
-  const outOfPocketTotal = Math.max(0, totalTripSpend - totalCoveredBySinkingFund);
-
-  // Find Vacation Sinking Fund (category === 'Vacation' or name matching)
-  const vacationFund =
-    sinkingFunds.find(
-      (sf) =>
-        sf.category === 'Vacation' ||
-        sf.name.toLowerCase().includes('vacation') ||
-        sf.name.toLowerCase().includes('trip')
-    ) || sinkingFunds[0];
-
-  const vacationFundBalance = vacationFund ? vacationFund.currentBalance : 0;
-  const vacationFundRemainingAfterTrip = Math.max(0, vacationFundBalance - outOfPocketTotal);
-
-  return {
-    totalTripSpend,
-    paidByBunny,
-    paidByMonkey,
-    paidByJoint,
-    paidBySinkingFund,
-    totalCoveredBySinkingFund,
-    outOfPocketTotal,
-    categoryBreakdown,
-    vacationFund,
-    vacationFundBalance,
-    vacationFundRemainingAfterTrip,
-    expensesCount: tripExpenses.length,
-  };
-}
-
-/**
- * Trip Settlement Engine
- */
-export function calculateTripSettlement(
-  tripId: string,
-  expenses: TripExpense[],
-  settlements: TripSettlement[]
-) {
-  const tripExpenses = expenses.filter((e) => e.tripId === tripId);
-  const tripSettlements = settlements.filter((s) => s.tripId === tripId);
-
-  let totalTripSpend = 0;
-  let paidByBunny = 0;
-  let paidByMonkey = 0;
-  let paidByJoint = 0;
-
-  let bunnyShouldPay = 0;
-  let monkeyShouldPay = 0;
-
-  const categoryBreakdown: Record<string, number> = {
-    Flights: 0,
-    Hotel: 0,
-    Dining: 0,
-    Transit: 0,
-    Activities: 0,
-    Shopping: 0,
-    Misc: 0,
-  };
-
-  tripExpenses.forEach((exp) => {
-    totalTripSpend += exp.totalCost;
-    categoryBreakdown[exp.category] = (categoryBreakdown[exp.category] || 0) + exp.totalCost;
-
-    if (exp.paidBy === 'bunny') paidByBunny += exp.totalCost;
-    else if (exp.paidBy === 'monkey') paidByMonkey += exp.totalCost;
-    else if (exp.paidBy === 'joint') paidByJoint += exp.totalCost;
-
-    // Calculate individual obligations
-    let bShare = 0;
-    let mShare = 0;
-
-    if (exp.splitRatio === '50/50') {
-      bShare = exp.totalCost * 0.5;
-      mShare = exp.totalCost * 0.5;
-    } else if (exp.splitRatio === '100% Bunny') {
-      bShare = exp.totalCost;
-      mShare = 0;
-    } else if (exp.splitRatio === '100% Monkey') {
-      bShare = 0;
-      mShare = exp.totalCost;
-    } else if (exp.splitRatio === 'custom') {
-      const bPct = (exp.customBunnyPercent ?? 50) / 100;
-      bShare = exp.totalCost * bPct;
-      mShare = exp.totalCost * (1 - bPct);
-    }
-
-    bunnyShouldPay += bShare;
-    monkeyShouldPay += mShare;
-  });
-
-  // Net balance between Bunny & Monkey (excluding joint account which is funded separately)
-  // Bunny's net balance: (Total paid by Bunny for shared items) - (Bunny's share of items paid by Monkey)
-  // More cleanly: for each expense paid by Bunny, Monkey owes his share to Bunny.
-  // for each expense paid by Monkey, Bunny owes her share to Monkey.
-  let monkeyOwesBunnyForExpenses = 0;
-  let bunnyOwesMonkeyForExpenses = 0;
-
-  tripExpenses.forEach((exp) => {
-    let bShare = 0;
-    let mShare = 0;
-
-    if (exp.splitRatio === '50/50') {
-      bShare = exp.totalCost * 0.5;
-      mShare = exp.totalCost * 0.5;
-    } else if (exp.splitRatio === '100% Bunny') {
-      bShare = exp.totalCost;
-      mShare = 0;
-    } else if (exp.splitRatio === '100% Monkey') {
-      bShare = 0;
-      mShare = exp.totalCost;
-    } else if (exp.splitRatio === 'custom') {
-      const bPct = (exp.customBunnyPercent ?? 50) / 100;
-      bShare = exp.totalCost * bPct;
-      mShare = exp.totalCost * (1 - bPct);
-    }
-
-    if (exp.paidBy === 'bunny') {
-      monkeyOwesBunnyForExpenses += mShare;
-    } else if (exp.paidBy === 'monkey') {
-      bunnyOwesMonkeyForExpenses += bShare;
-    }
-  });
-
-  // Factor in settlements already made
-  // If Bunny settled and paid Monkey $X, that reduces bunnyOwesMonkeyForExpenses or increases monkeyOwesBunnyForExpenses
-  let settlementsPaidByBunny = 0;
-  let settlementsPaidByMonkey = 0;
-
-  tripSettlements.forEach((st) => {
-    if (st.payer === 'bunny' && st.receiver === 'monkey') {
-      settlementsPaidByBunny += st.amount;
-    } else if (st.payer === 'monkey' && st.receiver === 'bunny') {
-      settlementsPaidByMonkey += st.amount;
-    }
-  });
-
-  // Net owed: positive means Monkey owes Bunny; negative means Bunny owes Monkey
-  const rawNetOwedToBunny =
-    monkeyOwesBunnyForExpenses -
-    bunnyOwesMonkeyForExpenses -
-    settlementsPaidByMonkey +
-    settlementsPaidByBunny;
-
-  const isSettled = Math.abs(rawNetOwedToBunny) < 0.01;
-  const debtor: 'bunny' | 'monkey' | null = isSettled
-    ? null
-    : rawNetOwedToBunny > 0
-    ? 'monkey'
-    : 'bunny';
-  const creditor: 'bunny' | 'monkey' | null = isSettled
-    ? null
-    : rawNetOwedToBunny > 0
-    ? 'bunny'
-    : 'monkey';
-  const settlementAmount = Math.abs(rawNetOwedToBunny);
-
-  return {
-    totalTripSpend,
-    paidByBunny,
-    paidByMonkey,
-    paidByJoint,
-    bunnyShouldPay,
-    monkeyShouldPay,
-    categoryBreakdown,
-    monkeyOwesBunnyForExpenses,
-    bunnyOwesMonkeyForExpenses,
-    settlementsPaidByBunny,
-    settlementsPaidByMonkey,
-    netBalance: rawNetOwedToBunny,
-    isSettled,
-    debtor,
-    creditor,
-    settlementAmount,
-    expensesCount: tripExpenses.length,
-    settlementsCount: tripSettlements.length,
   };
 }
 
@@ -997,12 +761,12 @@ export function getStatementPeriods(transactions: StatementTransaction[] = []): 
  */
 export function calculatePeriodAndYtdActuals(
   transactions: StatementTransaction[] = [],
-  periodId: string = '2026-08'
+  periodId: string = '2026-09'
 ) {
   const sanitized = sanitizeTransactions(transactions);
 
   let targetYear = 2026;
-  let targetMonth = 8;
+  let targetMonth = 9;
   const isAll = !periodId || periodId === 'all';
 
   if (!isAll && periodId && /^\d{4}-\d{2}$/.test(periodId)) {
@@ -1011,6 +775,8 @@ export function calculatePeriodAndYtdActuals(
     const parsedM = parseInt(mStr, 10);
     if (!isNaN(parsedY)) targetYear = parsedY;
     if (!isNaN(parsedM)) targetMonth = parsedM;
+  } else if (isAll) {
+    targetMonth = 12;
   }
 
   const periodTransactions: StatementTransaction[] = [];
@@ -1030,8 +796,18 @@ export function calculatePeriodAndYtdActuals(
     const cat = tx.assignedCategory || 'Uncategorized';
 
     // Check statement period match
-    const txPeriod = tx.statementPeriod || (tx.date && tx.date.length >= 7 ? tx.date.slice(0, 7) : '2026-08');
-    const [txY, txM] = txPeriod.split('-').map(Number);
+    const txPeriod = tx.statementPeriod || (tx.date && tx.date.length >= 7 ? tx.date.slice(0, 7) : '2026-09');
+    let txY = NaN;
+    let txM = NaN;
+    if (txPeriod && /^\d{4}-\d{2}/.test(txPeriod)) {
+      const parts = txPeriod.split('-');
+      txY = parseInt(parts[0], 10);
+      txM = parseInt(parts[1], 10);
+    } else if (tx.date && /^\d{4}-\d{2}/.test(tx.date)) {
+      const parts = tx.date.split('-');
+      txY = parseInt(parts[0], 10);
+      txM = parseInt(parts[1], 10);
+    }
 
     // Is this transaction in the selected statement period?
     const inPeriod = isAll ? true : (txPeriod === periodId);
@@ -1072,7 +848,7 @@ export function calculatePeriodAndYtdActuals(
     ytdTransactions,
     targetYear,
     targetMonth,
-    elapsedMonths: Math.max(1, targetMonth || 1),
+    elapsedMonths: Math.max(1, Math.min(12, targetMonth || 1)),
   };
 }
 
@@ -1249,20 +1025,25 @@ export function calculateBudgetVsActuals(
     categoryBudgets[e.category] = (categoryBudgets[e.category] || 0) + e.monthlyAmount;
   });
 
-  const assignedTxIds = new Set<string>();
+  const assignedPeriodTxIds = new Set<string>();
+  const assignedYtdTxIds = new Set<string>();
 
   const categoryComparisons = standardCategories.map((catConfig) => {
     const monthlyBudget = categoryBudgets[catConfig.key] || catConfig.defaultBudget;
     const ytdBudget = monthlyBudget * elapsedMonths;
 
     const periodMatchingTxs = periodData.periodTransactions.filter((tx) => {
+      if (assignedPeriodTxIds.has(tx.id)) return false;
       const match = matchesBudgetCategory(tx, catConfig.key);
-      if (match) assignedTxIds.add(tx.id);
+      if (match) assignedPeriodTxIds.add(tx.id);
       return match;
     });
 
     const ytdMatchingTxs = periodData.ytdTransactions.filter((tx) => {
-      return matchesBudgetCategory(tx, catConfig.key);
+      if (assignedYtdTxIds.has(tx.id)) return false;
+      const match = matchesBudgetCategory(tx, catConfig.key);
+      if (match) assignedYtdTxIds.add(tx.id);
+      return match;
     });
 
     const periodActual = periodMatchingTxs.reduce((sum, tx) => sum + tx.amount, 0);
@@ -1292,10 +1073,8 @@ export function calculateBudgetVsActuals(
   });
 
   // Check any remaining unassigned transactions
-  const unassignedPeriodTxs = periodData.periodTransactions.filter((tx) => !assignedTxIds.has(tx.id));
-  const unassignedYtdTxs = periodData.ytdTransactions.filter(
-    (tx) => !categoryComparisons.some((c) => c.ytdTransactions.some((ytx) => ytx.id === tx.id))
-  );
+  const unassignedPeriodTxs = periodData.periodTransactions.filter((tx) => !assignedPeriodTxIds.has(tx.id));
+  const unassignedYtdTxs = periodData.ytdTransactions.filter((tx) => !assignedYtdTxIds.has(tx.id));
 
   if (unassignedPeriodTxs.length > 0 || unassignedYtdTxs.length > 0) {
     const unassignedPeriodActual = unassignedPeriodTxs.reduce((sum, tx) => sum + tx.amount, 0);
