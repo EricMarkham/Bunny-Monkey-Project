@@ -131,20 +131,22 @@ export function mapRowToExpense(row: any): HouseholdExpense {
   };
 }
 
-export function mapExpenseToRow(exp: HouseholdExpense): Record<string, any> {
+export function mapExpenseToRow(exp: any): Record<string, any> {
+  const monthlyAmount = Number(
+    exp.monthly_amount ?? exp.monthlyAmount ?? exp.amount ?? 0
+  );
   return {
-    id: exp.id,
-    title: exp.title,
-    category: exp.category,
-    is_fixed: exp.isFixed,
-    monthly_amount: exp.monthlyAmount,
-    split_method: exp.splitMethod,
-    custom_bunny_percent: exp.customBunnyPercent ?? null,
-    custom_monkey_percent: exp.customMonkeyPercent ?? null,
-    fixed_payer: exp.fixedPayer ?? null,
-    fixed_amount: exp.fixedAmount ?? null,
+    id: String(exp.id),
+    title: String(exp.title || exp.name || '').trim(),
+    category: exp.category || 'Housing',
+    is_fixed: Boolean(exp.is_fixed ?? exp.isFixed ?? true),
+    monthly_amount: monthlyAmount,
+    split_method: exp.split_method || exp.splitMethod || 'proportional',
+    custom_bunny_percent: exp.custom_bunny_percent ?? exp.customBunnyPercent ?? null,
+    custom_monkey_percent: exp.custom_monkey_percent ?? exp.customMonkeyPercent ?? null,
+    fixed_payer: exp.fixed_payer ?? exp.fixedPayer ?? null,
+    fixed_amount: exp.fixed_amount ?? exp.fixedAmount ?? null,
     notes: exp.notes ?? null,
-    updated_at: new Date().toISOString(),
   };
 }
 
@@ -156,25 +158,34 @@ export function mapRowToSinkingFund(row: any): SinkingFund {
     id: String(row.id),
     name: row.name || '',
     category: row.category || 'Emergency',
-    currentBalance: Number(row.current_balance ?? row.currentBalance) || 0,
-    targetBalance: Number(row.target_balance ?? row.targetBalance) || 0,
-    monthlyContribution: Number(row.monthly_contribution ?? row.monthlyContribution) || 0,
+    currentBalance: Number(row.current_balance ?? row.currentBalance ?? row.current) || 0,
+    targetBalance: Number(row.target_amount ?? row.targetAmount ?? row.target_balance ?? row.targetBalance ?? row.target) || 0,
+    monthlyContribution: Number(row.monthly_contribution ?? row.monthlyContribution ?? row.monthly) || 0,
     targetDate: row.target_date || row.targetDate || undefined,
     notes: row.notes || undefined,
   };
 }
 
-export function mapSinkingFundToRow(sf: SinkingFund): Record<string, any> {
+export function mapSinkingFundToRow(sf: any): Record<string, any> {
+  const targetAmount = Number(
+    sf.target_amount ?? sf.targetAmount ?? sf.targetBalance ?? sf.target ?? sf.target_balance ?? 0
+  );
+  const currentBalance = Number(
+    sf.current_balance ?? sf.currentBalance ?? sf.current ?? 0
+  );
+  const monthlyContribution = Number(
+    sf.monthly_contribution ?? sf.monthlyContribution ?? sf.monthly ?? 0
+  );
+
   return {
-    id: sf.id,
-    name: sf.name,
-    category: sf.category,
-    current_balance: sf.currentBalance,
-    target_balance: sf.targetBalance,
-    monthly_contribution: sf.monthlyContribution,
-    target_date: sf.targetDate ?? null,
-    notes: sf.notes ?? null,
-    updated_at: new Date().toISOString(),
+    id: String(sf.id),
+    name: String(sf.name || '').trim(),
+    target_amount: targetAmount,
+    current_balance: currentBalance,
+    monthly_contribution: monthlyContribution,
+    target_date: sf.target_date || sf.targetDate || null,
+    category: sf.category || 'Emergency',
+    notes: sf.notes || null,
   };
 }
 
@@ -443,16 +454,40 @@ export async function persistEntireStateToSupabase(state: HouseholdState): Promi
 
     // 3. Sync expenses table
     if (state.expenses && state.expenses.length > 0) {
-      await supabase.from('expenses').upsert(state.expenses.map(mapExpenseToRow), {
+      const expRows = state.expenses.map(mapExpenseToRow);
+      const { error: expErr } = await supabase.from('expenses').upsert(expRows, {
         onConflict: 'id',
       });
+      if (expErr) {
+        console.error('[Supabase State Sync Error]: Failed to upsert expenses table:', expErr.message || expErr, { rows: expRows, error: expErr });
+        if (expErr.message?.includes('monthly_amount') || expErr.code === '42703') {
+          const fallbackExpRows = expRows.map((r) => {
+            const copy: Record<string, any> = { ...r, amount: r.monthly_amount };
+            delete copy.monthly_amount;
+            return copy;
+          });
+          await supabase.from('expenses').upsert(fallbackExpRows, { onConflict: 'id' });
+        }
+      }
     }
 
     // 4. Sync sinking funds table
     if (state.sinkingFunds && state.sinkingFunds.length > 0) {
-      await supabase.from('sinking_funds').upsert(state.sinkingFunds.map(mapSinkingFundToRow), {
+      const sfRows = state.sinkingFunds.map(mapSinkingFundToRow);
+      const { error: sfErr } = await supabase.from('sinking_funds').upsert(sfRows, {
         onConflict: 'id',
       });
+      if (sfErr) {
+        console.error('[Supabase State Sync Error]: Failed to upsert sinking_funds table:', sfErr.message || sfErr, { rows: sfRows, error: sfErr });
+        if (sfErr.message?.includes('target_amount') || sfErr.code === '42703') {
+          const fallbackSfRows = sfRows.map((r) => {
+            const copy: Record<string, any> = { ...r, target_balance: r.target_amount };
+            delete copy.target_amount;
+            return copy;
+          });
+          await supabase.from('sinking_funds').upsert(fallbackSfRows, { onConflict: 'id' });
+        }
+      }
     }
 
     // 5. Sync statement transactions table
@@ -617,10 +652,23 @@ export async function insertOrUpdateExpenseInSupabase(expense: HouseholdExpense)
     const row = mapExpenseToRow(expense);
     const { error } = await supabase.from('expenses').upsert(row, { onConflict: 'id' });
     if (error) {
-      console.warn('[Supabase] Could not upsert into expenses table:', error.message);
+      console.error('[Supabase Expenses Upsert Error]:', error.message || error, { payload: row, error });
+      // If error is column monthly_amount does not exist, retry with amount
+      if (error.message?.includes('monthly_amount') || error.code === '42703') {
+        const fallbackRow: Record<string, any> = { ...row, amount: row.monthly_amount };
+        delete fallbackRow.monthly_amount;
+        const { error: fallbackErr } = await supabase.from('expenses').upsert(fallbackRow, { onConflict: 'id' });
+        if (fallbackErr) {
+          console.error('[Supabase Expenses Fallback Error]:', fallbackErr.message || fallbackErr, { payload: fallbackRow, error: fallbackErr });
+          throw fallbackErr;
+        }
+        return;
+      }
+      throw error;
     }
-  } catch (err) {
-    console.error('[Supabase] insertOrUpdateExpense error:', err);
+  } catch (err: any) {
+    console.error('[Supabase Expenses Insert/Update Exception]:', err?.message || err, { expense, err });
+    throw err;
   }
 }
 
@@ -632,10 +680,12 @@ export async function deleteExpenseFromSupabase(expenseId: string): Promise<void
   try {
     const { error } = await supabase.from('expenses').delete().eq('id', expenseId);
     if (error) {
-      console.warn('[Supabase] Could not delete from expenses table:', error.message);
+      console.error('[Supabase Expenses Delete Error]:', error.message || error, { expenseId, error });
+      throw error;
     }
-  } catch (err) {
-    console.error('[Supabase] deleteExpense error:', err);
+  } catch (err: any) {
+    console.error('[Supabase Expenses Delete Exception]:', err?.message || err, { expenseId, err });
+    throw err;
   }
 }
 
@@ -648,10 +698,23 @@ export async function insertOrUpdateSinkingFundInSupabase(fund: SinkingFund): Pr
     const row = mapSinkingFundToRow(fund);
     const { error } = await supabase.from('sinking_funds').upsert(row, { onConflict: 'id' });
     if (error) {
-      console.warn('[Supabase] Could not upsert into sinking_funds table:', error.message);
+      console.error('[Supabase Sinking Funds Upsert Error]:', error.message || error, { payload: row, error });
+      // If error is column target_amount does not exist, fallback to target_balance
+      if (error.message?.includes('target_amount') || error.code === '42703') {
+        const fallbackRow: Record<string, any> = { ...row, target_balance: row.target_amount };
+        delete fallbackRow.target_amount;
+        const { error: fallbackErr } = await supabase.from('sinking_funds').upsert(fallbackRow, { onConflict: 'id' });
+        if (fallbackErr) {
+          console.error('[Supabase Sinking Funds Fallback Error]:', fallbackErr.message || fallbackErr, { payload: fallbackRow, error: fallbackErr });
+          throw fallbackErr;
+        }
+        return;
+      }
+      throw error;
     }
-  } catch (err) {
-    console.error('[Supabase] insertOrUpdateSinkingFund error:', err);
+  } catch (err: any) {
+    console.error('[Supabase Sinking Funds Insert/Update Exception]:', err?.message || err, { fund, err });
+    throw err;
   }
 }
 
@@ -663,10 +726,12 @@ export async function deleteSinkingFundFromSupabase(fundId: string): Promise<voi
   try {
     const { error } = await supabase.from('sinking_funds').delete().eq('id', fundId);
     if (error) {
-      console.warn('[Supabase] Could not delete from sinking_funds table:', error.message);
+      console.error('[Supabase Sinking Funds Delete Error]:', error.message || error, { fundId, error });
+      throw error;
     }
-  } catch (err) {
-    console.error('[Supabase] deleteSinkingFund error:', err);
+  } catch (err: any) {
+    console.error('[Supabase Sinking Funds Delete Exception]:', err?.message || err, { fundId, err });
+    throw err;
   }
 }
 
@@ -684,10 +749,12 @@ export async function updateSinkingFundBalanceInSupabase(
       .update({ current_balance: newBalance, updated_at: new Date().toISOString() })
       .eq('id', fundId);
     if (error) {
-      console.warn('[Supabase] Could not update balance in sinking_funds table:', error.message);
+      console.error('[Supabase Sinking Funds Balance Update Error]:', error.message || error, { fundId, newBalance, error });
+      throw error;
     }
-  } catch (err) {
-    console.error('[Supabase] updateSinkingFundBalance error:', err);
+  } catch (err: any) {
+    console.error('[Supabase Sinking Funds Balance Update Exception]:', err?.message || err, { fundId, newBalance, err });
+    throw err;
   }
 }
 
@@ -795,7 +862,7 @@ export async function updatePartnerIncomesInSupabase(partners: {
 
       // If no existing row was updated or an error occurred, perform upsert fallback
       if (updateErr || !updateData || updateData.length === 0) {
-        await supabase.from('settings').upsert(
+        const { error: upsertErr } = await supabase.from('settings').upsert(
           {
             id: 'partners',
             value: partners,
@@ -803,9 +870,12 @@ export async function updatePartnerIncomesInSupabase(partners: {
           },
           { onConflict: 'id' }
         );
+        if (upsertErr) {
+          console.error('[Supabase Settings Error]: Could not upsert partner incomes into settings table:', upsertErr.message || upsertErr, { partners, error: upsertErr });
+        }
       }
-    } catch (settingsErr) {
-      console.warn('[Supabase] Could not update settings table:', settingsErr);
+    } catch (settingsErr: any) {
+      console.error('[Supabase Settings Exception]: Could not update settings table for incomes:', settingsErr?.message || settingsErr);
     }
 
     // 2. Direct update query into household_state table
@@ -829,7 +899,7 @@ export async function updatePartnerIncomesInSupabase(partners: {
         .select();
 
       if (hsUpdateErr || !hsUpdateData || hsUpdateData.length === 0) {
-        await supabase.from('household_state').upsert(
+        const { error: hsUpsertErr } = await supabase.from('household_state').upsert(
           {
             id: 'current_household_state',
             state: updatedState,
@@ -837,12 +907,48 @@ export async function updatePartnerIncomesInSupabase(partners: {
           },
           { onConflict: 'id' }
         );
+        if (hsUpsertErr) {
+          console.error('[Supabase Household State Error]: Could not upsert partner incomes into household_state table:', hsUpsertErr.message || hsUpsertErr, { error: hsUpsertErr });
+        }
       }
-    } catch (hsErr) {
-      console.warn('[Supabase] Could not update household_state table:', hsErr);
+    } catch (hsErr: any) {
+      console.error('[Supabase Household State Exception]: Could not update household_state table for incomes:', hsErr?.message || hsErr);
     }
-  } catch (err) {
-    console.error('[Supabase] updatePartnerIncomes error:', err);
+
+    // 3. If an incomes table exists in the Supabase schema, sync aligned rows
+    try {
+      const incomeRows = [
+        {
+          id: 'bunny',
+          partner: 'bunny',
+          name: partners.bunny.name,
+          gross_income: partners.bunny.grossMonthlyIncome,
+          net_income: partners.bunny.netMonthlyIncome,
+          gross_monthly_income: partners.bunny.grossMonthlyIncome,
+          net_monthly_income: partners.bunny.netMonthlyIncome,
+          updated_at: timestamp,
+        },
+        {
+          id: 'monkey',
+          partner: 'monkey',
+          name: partners.monkey.name,
+          gross_income: partners.monkey.grossMonthlyIncome,
+          net_income: partners.monkey.netMonthlyIncome,
+          gross_monthly_income: partners.monkey.grossMonthlyIncome,
+          net_monthly_income: partners.monkey.netMonthlyIncome,
+          updated_at: timestamp,
+        },
+      ];
+      const { error: incErr } = await supabase.from('incomes').upsert(incomeRows, { onConflict: 'id' });
+      if (incErr && incErr.code !== '42P01') {
+        console.error('[Supabase Incomes Table Error]:', incErr.message || incErr, { error: incErr });
+      }
+    } catch {
+      // incomes table is optional
+    }
+  } catch (err: any) {
+    console.error('[Supabase Partner Incomes Exception]: updatePartnerIncomes error:', err?.message || err);
+    throw err;
   }
 }
 

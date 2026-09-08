@@ -133,12 +133,14 @@ export function BudgetModule({
   // Cloud sync state for BudgetModule
   const [isSyncing, setIsSyncing] = useState(false);
   const [syncStatus, setSyncStatus] = useState<string | null>(null);
+  const [dbError, setDbError] = useState<string | null>(null);
   const [isSavingIncome, setIsSavingIncome] = useState(false);
   const [incomeSaveError, setIncomeSaveError] = useState<string | null>(null);
 
   const syncFromSupabase = async () => {
     if (!isSupabaseConfigured()) return;
     setIsSyncing(true);
+    setDbError(null);
     try {
       const [expRes, sfRes, settingsRes, hsRes] = await Promise.all([
         supabase.from('expenses').select('*'),
@@ -146,13 +148,19 @@ export function BudgetModule({
         supabase.from('settings').select('value').eq('id', 'partners').maybeSingle(),
         supabase.from('household_state').select('state').eq('id', 'current_household_state').maybeSingle(),
       ]);
-      if (!expRes.error && expRes.data) {
+      if (expRes.error) {
+        console.error('[Supabase Expenses Fetch Error]:', expRes.error.message || expRes.error);
+        setDbError(`Failed to fetch expenses: ${expRes.error.message}`);
+      } else if (expRes.data) {
         onUpdateState((prev) => ({
           ...prev,
           expenses: expRes.data.map(mapRowToExpense),
         }));
       }
-      if (!sfRes.error && sfRes.data) {
+      if (sfRes.error) {
+        console.error('[Supabase Sinking Funds Fetch Error]:', sfRes.error.message || sfRes.error);
+        setDbError(`Failed to fetch sinking funds: ${sfRes.error.message}`);
+      } else if (sfRes.data) {
         onUpdateState((prev) => ({
           ...prev,
           sinkingFunds: sfRes.data.map(mapRowToSinkingFund),
@@ -254,20 +262,27 @@ export function BudgetModule({
     }));
 
     // Immediately execute database insert/update query to persist expense directly in Supabase
-    if (isSupabaseConfigured()) {
-      const row = mapExpenseToRow(newExpense);
-      try {
+    try {
+      if (isSupabaseConfigured()) {
+        const row = mapExpenseToRow(newExpense);
         const { error } = await supabase.from('expenses').insert(row);
         if (error) {
-          await supabase.from('expenses').upsert(row, { onConflict: 'id' });
+          console.error('[Supabase Expenses Direct Insert Error]:', error.message || error, { payload: row, error });
+          const { error: upsertErr } = await supabase.from('expenses').upsert(row, { onConflict: 'id' });
+          if (upsertErr) {
+            console.error('[Supabase Expenses Direct Upsert Error]:', upsertErr.message || upsertErr, { payload: row, error: upsertErr });
+            throw upsertErr;
+          }
         }
-      } catch (err) {
-        console.warn('[Supabase] direct expense insert error:', err);
       }
+      await insertOrUpdateExpenseInSupabase(newExpense);
+      setSyncStatus('✓ Recurring bill saved to Supabase');
+      setTimeout(() => setSyncStatus(null), 3000);
+      setDbError(null);
+    } catch (err: any) {
+      console.error('[Supabase Expenses Insert Exception]:', err?.message || err, { expense: newExpense, err });
+      setDbError(`Failed to save expense to Supabase: ${err?.message || String(err)}`);
     }
-    await insertOrUpdateExpenseInSupabase(newExpense);
-    setSyncStatus('✓ Recurring bill saved to Supabase');
-    setTimeout(() => setSyncStatus(null), 3000);
 
     // Reset
     setNewExpTitle('');
@@ -284,16 +299,22 @@ export function BudgetModule({
       expenses: prev.expenses.filter((exp) => exp.id !== id),
     }));
     // Immediately execute database delete query in Supabase
-    if (isSupabaseConfigured()) {
-      try {
-        await supabase.from('expenses').delete().eq('id', id);
-      } catch (err) {
-        console.warn('[Supabase] direct expense delete error:', err);
+    try {
+      if (isSupabaseConfigured()) {
+        const { error } = await supabase.from('expenses').delete().eq('id', id);
+        if (error) {
+          console.error('[Supabase Expenses Direct Delete Error]:', error.message || error, { id, error });
+          throw error;
+        }
       }
+      await deleteExpenseFromSupabase(id);
+      setSyncStatus('✓ Expense deleted from Supabase');
+      setTimeout(() => setSyncStatus(null), 3000);
+      setDbError(null);
+    } catch (err: any) {
+      console.error('[Supabase Expenses Delete Exception]:', err?.message || err, { id, err });
+      setDbError(`Failed to delete expense from Supabase: ${err?.message || String(err)}`);
     }
-    await deleteExpenseFromSupabase(id);
-    setSyncStatus('✓ Expense deleted from Supabase');
-    setTimeout(() => setSyncStatus(null), 3000);
   };
 
   const openEditExpense = (exp: HouseholdExpense) => {
@@ -338,20 +359,27 @@ export function BudgetModule({
     }));
 
     // Immediately execute database update query in Supabase
-    if (isSupabaseConfigured()) {
-      const row = mapExpenseToRow(updatedExpense);
-      try {
+    try {
+      if (isSupabaseConfigured()) {
+        const row = mapExpenseToRow(updatedExpense);
         const { error } = await supabase.from('expenses').update(row).eq('id', updatedExpense.id);
         if (error) {
-          await supabase.from('expenses').upsert(row, { onConflict: 'id' });
+          console.error('[Supabase Expenses Direct Update Error]:', error.message || error, { payload: row, error });
+          const { error: upsertErr } = await supabase.from('expenses').upsert(row, { onConflict: 'id' });
+          if (upsertErr) {
+            console.error('[Supabase Expenses Direct Upsert Error]:', upsertErr.message || upsertErr, { payload: row, error: upsertErr });
+            throw upsertErr;
+          }
         }
-      } catch (err) {
-        console.warn('[Supabase] direct expense update error:', err);
       }
+      await insertOrUpdateExpenseInSupabase(updatedExpense);
+      setSyncStatus('✓ Expense updated in Supabase');
+      setTimeout(() => setSyncStatus(null), 3000);
+      setDbError(null);
+    } catch (err: any) {
+      console.error('[Supabase Expenses Update Exception]:', err?.message || err, { expense: updatedExpense, err });
+      setDbError(`Failed to update expense in Supabase: ${err?.message || String(err)}`);
     }
-    await insertOrUpdateExpenseInSupabase(updatedExpense);
-    setSyncStatus('✓ Expense updated in Supabase');
-    setTimeout(() => setSyncStatus(null), 3000);
 
     setEditingExpense(null);
   };
@@ -410,20 +438,27 @@ export function BudgetModule({
     });
 
     // Execute immediate Supabase update
-    if (isSupabaseConfigured()) {
-      const row = mapSinkingFundToRow(updatedFund);
-      try {
+    try {
+      if (isSupabaseConfigured()) {
+        const row = mapSinkingFundToRow(updatedFund);
         const { error } = await supabase.from('sinking_funds').update(row).eq('id', updatedFund.id);
         if (error) {
-          await supabase.from('sinking_funds').upsert(row, { onConflict: 'id' });
+          console.error('[Supabase Sinking Funds Direct Update Error]:', error.message || error, { payload: row, error });
+          const { error: upsertErr } = await supabase.from('sinking_funds').upsert(row, { onConflict: 'id' });
+          if (upsertErr) {
+            console.error('[Supabase Sinking Funds Direct Upsert Error]:', upsertErr.message || upsertErr, { payload: row, error: upsertErr });
+            throw upsertErr;
+          }
         }
-      } catch (err) {
-        console.warn('[Supabase] direct sinking fund update error:', err);
       }
+      await insertOrUpdateSinkingFundInSupabase(updatedFund);
+      setSyncStatus('✓ Sinking fund updated in Supabase');
+      setTimeout(() => setSyncStatus(null), 3000);
+      setDbError(null);
+    } catch (err: any) {
+      console.error('[Supabase Sinking Funds Update Exception]:', err?.message || err, { fund: updatedFund, err });
+      setDbError(`Failed to update sinking fund in Supabase: ${err?.message || String(err)}`);
     }
-    await insertOrUpdateSinkingFundInSupabase(updatedFund);
-    setSyncStatus('✓ Sinking fund updated in Supabase');
-    setTimeout(() => setSyncStatus(null), 3000);
 
     setEditingFund(null);
   };
@@ -435,16 +470,22 @@ export function BudgetModule({
       sinkingFunds: prev.sinkingFunds.filter((f) => f.id !== fundId),
     }));
     // Execute immediate Supabase delete
-    if (isSupabaseConfigured()) {
-      try {
-        await supabase.from('sinking_funds').delete().eq('id', fundId);
-      } catch (err) {
-        console.warn('[Supabase] direct sinking fund delete error:', err);
+    try {
+      if (isSupabaseConfigured()) {
+        const { error } = await supabase.from('sinking_funds').delete().eq('id', fundId);
+        if (error) {
+          console.error('[Supabase Sinking Funds Direct Delete Error]:', error.message || error, { fundId, error });
+          throw error;
+        }
       }
+      await deleteSinkingFundFromSupabase(fundId);
+      setSyncStatus('✓ Sinking fund deleted from Supabase');
+      setTimeout(() => setSyncStatus(null), 3000);
+      setDbError(null);
+    } catch (err: any) {
+      console.error('[Supabase Sinking Funds Delete Exception]:', err?.message || err, { fundId, err });
+      setDbError(`Failed to delete sinking fund from Supabase: ${err?.message || String(err)}`);
     }
-    await deleteSinkingFundFromSupabase(fundId);
-    setSyncStatus('✓ Sinking fund deleted from Supabase');
-    setTimeout(() => setSyncStatus(null), 3000);
     setEditingFund(null);
   };
 
@@ -472,20 +513,27 @@ export function BudgetModule({
     }));
 
     // Execute immediate Supabase insert
-    if (isSupabaseConfigured()) {
-      const row = mapSinkingFundToRow(newFund);
-      try {
+    try {
+      if (isSupabaseConfigured()) {
+        const row = mapSinkingFundToRow(newFund);
         const { error } = await supabase.from('sinking_funds').insert(row);
         if (error) {
-          await supabase.from('sinking_funds').upsert(row, { onConflict: 'id' });
+          console.error('[Supabase Sinking Funds Direct Insert Error]:', error.message || error, { payload: row, error });
+          const { error: upsertErr } = await supabase.from('sinking_funds').upsert(row, { onConflict: 'id' });
+          if (upsertErr) {
+            console.error('[Supabase Sinking Funds Direct Upsert Error]:', upsertErr.message || upsertErr, { payload: row, error: upsertErr });
+            throw upsertErr;
+          }
         }
-      } catch (err) {
-        console.warn('[Supabase] direct sinking fund insert error:', err);
       }
+      await insertOrUpdateSinkingFundInSupabase(newFund);
+      setSyncStatus('✓ Sinking fund created in Supabase');
+      setTimeout(() => setSyncStatus(null), 3000);
+      setDbError(null);
+    } catch (err: any) {
+      console.error('[Supabase Sinking Funds Insert Exception]:', err?.message || err, { fund: newFund, err });
+      setDbError(`Failed to save sinking fund to Supabase: ${err?.message || String(err)}`);
     }
-    await insertOrUpdateSinkingFundInSupabase(newFund);
-    setSyncStatus('✓ Sinking fund created in Supabase');
-    setTimeout(() => setSyncStatus(null), 3000);
 
     setNewSfName('');
     setNewSfTarget('');
@@ -535,9 +583,15 @@ export function BudgetModule({
     });
 
     // Execute immediate Supabase balance update
-    await updateSinkingFundBalanceInSupabase(selectedFundForAdjust.id, newBalance);
-    setSyncStatus('✓ Sinking fund balance updated in Supabase');
-    setTimeout(() => setSyncStatus(null), 3000);
+    try {
+      await updateSinkingFundBalanceInSupabase(selectedFundForAdjust.id, newBalance);
+      setSyncStatus('✓ Sinking fund balance updated in Supabase');
+      setTimeout(() => setSyncStatus(null), 3000);
+      setDbError(null);
+    } catch (err: any) {
+      console.error('[Supabase Sinking Fund Balance Adjustment Exception]:', err?.message || err, { fundId: selectedFundForAdjust.id, newBalance, err });
+      setDbError(`Failed to update sinking fund balance in Supabase: ${err?.message || String(err)}`);
+    }
 
     setSelectedFundForAdjust(null);
     setFundAdjustAmount('');
@@ -635,10 +689,12 @@ export function BudgetModule({
 
       setSyncStatus('✓ Incomes persisted to Supabase');
       setTimeout(() => setSyncStatus(null), 3000);
+      setDbError(null);
       setShowIncomeModal(false);
     } catch (err: any) {
-      console.error('[Supabase Partner Income Save Error]', err);
+      console.error('[Supabase Partner Income Save Error]:', err?.message || err, { partners: updatedPartners, err });
       setIncomeSaveError(err.message || 'Failed to save to Supabase');
+      setDbError(`Failed to persist partner incomes to Supabase: ${err?.message || String(err)}`);
     } finally {
       setIsSavingIncome(false);
     }
@@ -656,6 +712,25 @@ export function BudgetModule({
 
   return (
     <div className="space-y-8 pb-16">
+      {/* Database Error Alert Notification */}
+      {dbError && (
+        <div className="bg-rose-500/15 border border-rose-500/30 text-rose-300 px-4 py-3 rounded-2xl flex items-center justify-between gap-3 text-xs sm:text-sm shadow-lg shadow-rose-950/20">
+          <div className="flex items-center gap-2.5">
+            <AlertCircle className="w-5 h-5 text-rose-400 shrink-0" />
+            <div>
+              <p className="font-semibold text-rose-200">Supabase Database Mismatch / Error</p>
+              <p className="text-rose-300/90 text-xs">{dbError}</p>
+            </div>
+          </div>
+          <button
+            onClick={() => setDbError(null)}
+            className="text-xs px-3 py-1.5 rounded-lg bg-rose-500/20 hover:bg-rose-500/30 text-rose-200 font-medium transition-colors shrink-0"
+          >
+            Dismiss
+          </button>
+        </div>
+      )}
+
       {/* Top Section: Income Splitter & Core Financial KPIs */}
       <div className="grid grid-cols-1 xl:grid-cols-2 gap-6 2xl:gap-8">
         {/* Income Split Engine Card */}
