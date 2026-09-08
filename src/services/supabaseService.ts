@@ -75,15 +75,21 @@ export function mapHoldingToRow(h: DividendHolding): Record<string, any> {
  * Maps database transaction row to StatementTransaction
  */
 export function mapRowToTransaction(row: any): StatementTransaction {
+  const resolvedPartner = row.cardholder
+    ? String(row.cardholder).toLowerCase() === 'monkey'
+      ? 'monkey'
+      : 'bunny'
+    : row.partner || 'joint';
+
   return {
     id: String(row.id),
     date: row.transaction_date || row.date || '',
     statementPeriod: row.statement_period || row.statementPeriod || undefined,
     merchant: row.merchant || '',
     rawCategory: row.raw_category || row.rawCategory || undefined,
-    assignedCategory: row.assigned_category || row.assignedCategory || 'Discretionary',
+    assignedCategory: row.category || row.assigned_category || row.assignedCategory || 'Discretionary',
     amount: Number(row.amount) || 0,
-    partner: row.partner || 'joint',
+    partner: resolvedPartner,
     carbonEstimateKg: Number(row.carbon_estimate_kg ?? row.carbonEstimateKg) || 0,
     ecoCategory: row.eco_category || row.ecoCategory || 'Neutral',
     ecoTip: row.eco_tip || row.ecoTip || undefined,
@@ -93,29 +99,40 @@ export function mapRowToTransaction(row: any): StatementTransaction {
 
 /**
  * Maps StatementTransaction to Supabase DB row format.
- * Defaults to `transaction_date` as the standard Supabase column name.
+ * Defaults to valid database columns only, stripping any internal or unsupported fields.
  */
 export function mapTransactionToRow(
   tx: StatementTransaction,
   useDateColumn = false
 ): Record<string, any> {
+  const resolvedDate = tx.date || (tx as any).transaction_date || '';
+  const currentPeriod = tx.statementPeriod || (tx as any).statement_period || '2026-08';
+  const cardholder =
+    (tx as any).cardholder ||
+    (tx as any).card ||
+    (tx.partner ? (String(tx.partner).toLowerCase() === 'monkey' ? 'Monkey' : 'Bunny') : 'Bunny');
+  const category = (tx as any).category || tx.assignedCategory || (tx as any).auto_category || 'Groceries';
+  const merchant = tx.merchant || (tx as any).description || '';
+  const amount = Number(tx.amount) || 0;
+  const type = (tx as any).type || 'Debit';
+  const notes = (tx as any).notes || null;
+
   const row: Record<string, any> = {
     id: tx.id,
-    statement_period: tx.statementPeriod || null,
-    merchant: tx.merchant,
-    raw_category: tx.rawCategory || null,
-    assigned_category: tx.assignedCategory,
-    amount: tx.amount,
-    partner: tx.partner,
-    carbon_estimate_kg: tx.carbonEstimateKg || 0,
-    eco_category: tx.ecoCategory || 'Neutral',
-    eco_tip: tx.ecoTip || null,
-    is_recurring: Boolean(tx.isRecurring),
+    statement_period: currentPeriod,
+    cardholder,
+    category,
+    merchant,
+    amount,
+    type,
+    notes,
   };
+
   if (useDateColumn) {
-    row.date = tx.date;
+    row.date = resolvedDate;
   } else {
-    row.transaction_date = tx.date;
+    row.transaction_date = resolvedDate;
+    row.date = resolvedDate;
   }
   return row;
 }
@@ -634,25 +651,25 @@ export async function insertOrUpdateTransactionInSupabase(tx: StatementTransacti
     const row = mapTransactionToRow(tx, false);
     const { error: txErr } = await supabase.from('transactions').upsert(row, { onConflict: 'id' });
     if (txErr) {
-      console.error('Supabase Error:', txErr);
-      if (txErr.message?.includes('transaction_date') || txErr.code === '42703') {
+      console.error('Commit Ledger Error:', txErr);
+      if (txErr.message?.includes('transaction_date') || txErr.message?.includes('date') || txErr.code === '42703' || txErr.code === 'PGRST204') {
         const fallbackRow = mapTransactionToRow(tx, true);
         const { error: fbErr } = await supabase.from('transactions').upsert(fallbackRow, { onConflict: 'id' });
-        if (fbErr) console.error('Supabase Error:', fbErr);
+        if (fbErr) console.error('Commit Ledger Error:', fbErr);
       }
     }
 
     const { error: stErr } = await supabase.from('statement_transactions').upsert(row, { onConflict: 'id' });
     if (stErr) {
-      console.error('Supabase Error:', stErr);
-      if (stErr.message?.includes('transaction_date') || stErr.code === '42703') {
+      console.error('Commit Ledger Error:', stErr);
+      if (stErr.message?.includes('transaction_date') || stErr.message?.includes('date') || stErr.code === '42703' || stErr.code === 'PGRST204') {
         const fallbackRow = mapTransactionToRow(tx, true);
         const { error: fbErr } = await supabase.from('statement_transactions').upsert(fallbackRow, { onConflict: 'id' });
-        if (fbErr) console.error('Supabase Error:', fbErr);
+        if (fbErr) console.error('Commit Ledger Error:', fbErr);
       }
     }
   } catch (err) {
-    console.error('Supabase Error:', err);
+    console.error('Commit Ledger Error:', err);
   }
 }
 
@@ -665,25 +682,25 @@ export async function bulkInsertTransactionsInSupabase(txs: StatementTransaction
     const rows = txs.map((tx) => mapTransactionToRow(tx, false));
     const { error: txErr } = await supabase.from('transactions').upsert(rows, { onConflict: 'id' });
     if (txErr) {
-      console.error('Supabase Error:', txErr);
-      if (txErr.message?.includes('transaction_date') || txErr.code === '42703') {
+      console.error('Commit Ledger Error:', txErr);
+      if (txErr.message?.includes('transaction_date') || txErr.message?.includes('date') || txErr.code === '42703' || txErr.code === 'PGRST204') {
         const fallbackRows = txs.map((tx) => mapTransactionToRow(tx, true));
         const { error: fbErr } = await supabase.from('transactions').upsert(fallbackRows, { onConflict: 'id' });
-        if (fbErr) console.error('Supabase Error:', fbErr);
+        if (fbErr) console.error('Commit Ledger Error:', fbErr);
       }
     }
 
     const { error: stErr } = await supabase.from('statement_transactions').upsert(rows, { onConflict: 'id' });
     if (stErr) {
-      console.error('Supabase Error:', stErr);
-      if (stErr.message?.includes('transaction_date') || stErr.code === '42703') {
+      console.error('Commit Ledger Error:', stErr);
+      if (stErr.message?.includes('transaction_date') || stErr.message?.includes('date') || stErr.code === '42703' || stErr.code === 'PGRST204') {
         const fallbackRows = txs.map((tx) => mapTransactionToRow(tx, true));
         const { error: fbErr } = await supabase.from('statement_transactions').upsert(fallbackRows, { onConflict: 'id' });
-        if (fbErr) console.error('Supabase Error:', fbErr);
+        if (fbErr) console.error('Commit Ledger Error:', fbErr);
       }
     }
   } catch (err) {
-    console.error('Supabase Error:', err);
+    console.error('Commit Ledger Error:', err);
   }
 }
 

@@ -423,71 +423,137 @@ export function StatementParserModule({
   const handleCommitTransactions = async () => {
     if (parsedItems.length === 0 || !isYearValid || isCommitting) return;
     setIsCommitting(true);
-    const count = parsedItems.length;
-    const total = parsedItems.reduce((acc, i) => acc + i.amount, 0);
-    const rows = parsedItems.map(mapTransactionToRow);
 
-    // Requirement 1: Supabase Persistence on Commit
-    // When the user clicks "Commit to Household Ledger", execute an immediate batch insert:
-    // await supabase.from('transactions').upsert([...], { onConflict: 'id' }) for all parsed rows.
-    if (isSupabaseConfigured() && rows.length > 0) {
-      try {
-        const { error: insertErr } = await supabase.from('transactions').upsert(rows, { onConflict: 'id' });
+    try {
+      const count = parsedItems.length;
+      const total = parsedItems.reduce((acc, i) => acc + (Number(i.amount) || 0), 0);
+      const currentPeriod = effectiveTargetUploadPeriod || selectedPeriod || '2026-08';
+
+      // Helper to generate UUID safely
+      const getUUID = () =>
+        typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+          ? crypto.randomUUID()
+          : `tx-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
+
+      // Requirement 1: Payload Sanitization
+      // Sanitize each item so it only sends valid database columns and strips UI-only internal keys
+      const sanitizedRows = parsedItems.map((tx: any) => {
+        const rawTx = tx as Record<string, any>;
+        return {
+          id: rawTx.id || getUUID(),
+          transaction_date: rawTx.date || rawTx.transaction_date || new Date().toISOString().split('T')[0],
+          date: rawTx.date || rawTx.transaction_date || new Date().toISOString().split('T')[0],
+          statement_period: rawTx.statement_period || rawTx.statementPeriod || currentPeriod,
+          cardholder:
+            rawTx.cardholder ||
+            rawTx.card ||
+            (rawTx.partner ? (String(rawTx.partner).toLowerCase() === 'monkey' ? 'Monkey' : 'Bunny') : 'Bunny'),
+          category: rawTx.category || rawTx.assignedCategory || rawTx.auto_category || 'Groceries',
+          merchant: rawTx.merchant || rawTx.description || 'Unknown Merchant',
+          amount: Number(rawTx.amount) || 0,
+          type: rawTx.type || 'Debit',
+          notes: rawTx.notes || null,
+        };
+      });
+
+      // Requirement 2: Error Handling & Persistence
+      if (isSupabaseConfigured() && sanitizedRows.length > 0) {
+        const { error: insertErr } = await supabase
+          .from('transactions')
+          .upsert(sanitizedRows, { onConflict: 'id' });
+
         if (insertErr) {
-          console.error('Supabase Error:', insertErr);
-          if (insertErr.message?.includes('transaction_date') || insertErr.code === '42703') {
-            const fallbackRows = parsedItems.map((tx) => mapTransactionToRow(tx, true));
-            const { error: fbErr } = await supabase.from('transactions').upsert(fallbackRows, { onConflict: 'id' });
-            if (fbErr) console.error('Supabase Error:', fbErr);
+          console.error('Commit Ledger Error:', insertErr);
+
+          // Graceful fallback if database schema accepts only 'date' or only 'transaction_date'
+          if (
+            insertErr.message?.includes('transaction_date') ||
+            insertErr.message?.includes('date') ||
+            insertErr.code === '42703' ||
+            insertErr.code === 'PGRST204'
+          ) {
+            const rowsWithoutTxDate = sanitizedRows.map(({ transaction_date, ...rest }) => rest);
+            const { error: fbErr1 } = await supabase
+              .from('transactions')
+              .upsert(rowsWithoutTxDate, { onConflict: 'id' });
+
+            if (fbErr1) {
+              console.error('Commit Ledger Error:', fbErr1);
+              const rowsWithoutDate = sanitizedRows.map(({ date, ...rest }) => rest);
+              const { error: fbErr2 } = await supabase
+                .from('transactions')
+                .upsert(rowsWithoutDate, { onConflict: 'id' });
+              if (fbErr2) {
+                console.error('Commit Ledger Error:', fbErr2);
+              }
+            }
           }
         }
+
         // Mirror to statement_transactions table to guarantee full database consistency
         try {
-          const { error: stErr } = await supabase.from('statement_transactions').upsert(rows, { onConflict: 'id' });
+          const { error: stErr } = await supabase
+            .from('statement_transactions')
+            .upsert(sanitizedRows, { onConflict: 'id' });
+
           if (stErr) {
-            console.error('Supabase Error:', stErr);
-            if (stErr.message?.includes('transaction_date') || stErr.code === '42703') {
-              const fallbackRows = parsedItems.map((tx) => mapTransactionToRow(tx, true));
-              const { error: fbErr } = await supabase.from('statement_transactions').upsert(fallbackRows, { onConflict: 'id' });
-              if (fbErr) console.error('Supabase Error:', fbErr);
+            console.error('Commit Ledger Error:', stErr);
+            if (
+              stErr.message?.includes('transaction_date') ||
+              stErr.message?.includes('date') ||
+              stErr.code === '42703' ||
+              stErr.code === 'PGRST204'
+            ) {
+              const rowsWithoutTxDate = sanitizedRows.map(({ transaction_date, ...rest }) => rest);
+              const { error: fbErr1 } = await supabase
+                .from('statement_transactions')
+                .upsert(rowsWithoutTxDate, { onConflict: 'id' });
+              if (fbErr1) {
+                console.error('Commit Ledger Error:', fbErr1);
+                const rowsWithoutDate = sanitizedRows.map(({ date, ...rest }) => rest);
+                const { error: fbErr2 } = await supabase
+                  .from('statement_transactions')
+                  .upsert(rowsWithoutDate, { onConflict: 'id' });
+                if (fbErr2) console.error('Commit Ledger Error:', fbErr2);
+              }
             }
           }
         } catch (stCatchErr) {
-          console.error('Supabase Error:', stCatchErr);
+          console.error('Commit Ledger Error:', stCatchErr);
         }
-      } catch (err) {
-        console.error('Supabase Error:', err);
       }
+
+      // Update in-memory state and active database transaction cache immediately
+      const existing = activeTransactions.filter((ex) => !parsedItems.some((p) => p.id === ex.id));
+      const updated = sanitizeTransactions([...parsedItems, ...existing]);
+
+      setDbTransactions(updated);
+      onUpdateState((prev) => ({
+        ...prev,
+        statementTransactions: updated,
+      }));
+
+      // Auto-select the statement period that was just committed to
+      setSelectedPeriod(effectiveTargetUploadPeriod);
+
+      setSuccessCommitMessage(
+        `✓ Successfully saved ${count} transactions (${formatCurrency(total)}) to the ${
+          effectiveTargetUploadPeriod === '2026-08' ? 'August 2026' : effectiveTargetUploadPeriod
+        } Statement Ledger! Period spend and Year-to-Date totals are active.`
+      );
+      setTimeout(() => {
+        setSuccessCommitMessage(null);
+      }, 6000);
+
+      setParsedItems([]);
+      setRawText('');
+    } catch (error) {
+      console.error('Commit Ledger Error:', error);
+      setSyncStatus('⚠️ Failed to commit transactions to ledger');
+      setTimeout(() => setSyncStatus(null), 4000);
+    } finally {
+      setIsCommitting(false);
     }
-
-    // Immediately persist each committed transaction to Supabase database
-    bulkInsertTransactionsInSupabase(parsedItems);
-
-    // Update in-memory state and active database transaction cache immediately
-    const existing = activeTransactions.filter((ex) => !parsedItems.some((p) => p.id === ex.id));
-    const updated = sanitizeTransactions([...parsedItems, ...existing]);
-
-    setDbTransactions(updated);
-    onUpdateState((prev) => ({
-      ...prev,
-      statementTransactions: updated,
-    }));
-
-    // Auto-select the statement period that was just committed to
-    setSelectedPeriod(effectiveTargetUploadPeriod);
-
-    setSuccessCommitMessage(
-      `✓ Successfully saved ${count} transactions (${formatCurrency(total)}) to the ${
-        effectiveTargetUploadPeriod === '2026-08' ? 'August 2026' : effectiveTargetUploadPeriod
-      } Statement Ledger! Period spend and Year-to-Date totals are active.`
-    );
-    setTimeout(() => {
-      setSuccessCommitMessage(null);
-    }, 6000);
-
-    setParsedItems([]);
-    setRawText('');
-    setIsCommitting(false);
   };
 
   // Remove single item from parsed preview
