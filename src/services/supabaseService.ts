@@ -4,6 +4,8 @@ import {
   DividendHolding,
   StatementTransaction,
   HouseholdExpense,
+  ExpenseCategory,
+  ExpenseSplitMethod,
   SinkingFund,
   Partner,
 } from '../types';
@@ -135,40 +137,231 @@ export function mapTransactionToRow(
 }
 
 /**
+ * Known columns in Supabase 'expenses' table to ensure exact schema matching
+ */
+let knownExpenseColumns: Set<string> | null = null;
+
+export function setKnownExpenseColumns(columns: string[]) {
+  if (Array.isArray(columns) && columns.length > 0) {
+    knownExpenseColumns = new Set(columns.map((c) => String(c).toLowerCase().trim()));
+    console.info('[Supabase] Registered expenses table schema columns:', Array.from(knownExpenseColumns));
+  }
+}
+
+/**
  * Maps database expense row to HouseholdExpense
  */
 export function mapRowToExpense(row: any): HouseholdExpense {
+  const title = String(row.item || row.name || row.title || '').trim();
+  const category = (row.category || 'Housing') as ExpenseCategory;
+
+  let isFixed = true;
+  if (row.is_fixed !== undefined && row.is_fixed !== null) {
+    isFixed = Boolean(row.is_fixed);
+  } else if (typeof row.type === 'string') {
+    isFixed = !row.type.toLowerCase().includes('var');
+  } else if (row.isFixed !== undefined) {
+    isFixed = Boolean(row.isFixed);
+  }
+
+  const monthlyAmount = Number(
+    row.monthly_cost ?? row.amount ?? row.monthly_amount ?? row.monthlyAmount ?? 0
+  ) || 0;
+
+  const rawSplit = String(
+    row.split_logic ?? row.split ?? row.split_method ?? row.splitMethod ?? 'proportional'
+  ).toLowerCase();
+
+  let splitMethod: ExpenseSplitMethod = 'proportional';
+  if (rawSplit.includes('equal') || rawSplit.includes('50')) {
+    splitMethod = 'equal';
+  } else if (rawSplit.includes('custom')) {
+    splitMethod = 'custom';
+  } else if (rawSplit.includes('fixed') && rawSplit.includes('dollar')) {
+    splitMethod = 'fixed_dollar';
+  } else {
+    splitMethod = 'proportional';
+  }
+
+  let customBunnyPercent: number | undefined = undefined;
+  let customMonkeyPercent: number | undefined = undefined;
+  if (splitMethod === 'custom') {
+    const bShare = Number(row.bunny_share);
+    const mShare = Number(row.monkey_share);
+    if (!isNaN(bShare) && !isNaN(mShare) && bShare + mShare > 0) {
+      customBunnyPercent = Math.round((bShare / (bShare + mShare)) * 100);
+      customMonkeyPercent = 100 - customBunnyPercent;
+    } else if (row.customBunnyPercent !== undefined) {
+      customBunnyPercent = Number(row.customBunnyPercent);
+      customMonkeyPercent = 100 - customBunnyPercent;
+    }
+  }
+
   return {
     id: String(row.id),
-    title: row.title || '',
-    category: row.category || 'Housing',
-    isFixed: Boolean(row.is_fixed ?? row.isFixed ?? true),
-    monthlyAmount: Number(row.monthly_amount ?? row.monthlyAmount) || 0,
-    splitMethod: row.split_method || row.splitMethod || 'proportional',
-    customBunnyPercent: row.custom_bunny_percent ?? row.customBunnyPercent,
-    customMonkeyPercent: row.custom_monkey_percent ?? row.customMonkeyPercent,
+    title: title || 'Expense',
+    category,
+    isFixed,
+    monthlyAmount,
+    splitMethod,
+    customBunnyPercent,
+    customMonkeyPercent,
     fixedPayer: row.fixed_payer ?? row.fixedPayer,
-    fixedAmount: row.fixed_amount ?? row.fixedAmount,
+    fixedAmount:
+      row.fixed_amount !== undefined
+        ? Number(row.fixed_amount)
+        : row.fixedAmount !== undefined
+        ? Number(row.fixedAmount)
+        : undefined,
     notes: row.notes || undefined,
   };
 }
 
-export function mapExpenseToRow(exp: any): Record<string, any> {
-  const monthlyAmount = Number(
-    exp.monthly_amount ?? exp.monthlyAmount ?? exp.amount ?? 0
+/**
+ * Maps HouseholdExpense to a Supabase row payload matching table columns exactly.
+ * Matches: item or name, category, type, split_logic or split, monthly_cost or amount, bunny_share, monkey_share.
+ * Explicitly excludes custom_bunny_percent and custom_monkey_percent to prevent schema mismatch errors.
+ */
+export function mapExpenseToRow(
+  exp: any,
+  partners?: { bunny: Partner; monkey: Partner }
+): Record<string, any> {
+  const title = String(exp.item || exp.name || exp.title || '').trim();
+  const category = exp.category || 'Housing';
+  const type =
+    typeof exp.type === 'string'
+      ? exp.type
+      : Boolean(exp.is_fixed ?? exp.isFixed ?? true)
+      ? 'Fixed'
+      : 'Variable';
+
+  const rawSplit = String(
+    exp.split_logic ?? exp.split ?? exp.splitMethod ?? exp.split_method ?? 'proportional'
+  ).toLowerCase();
+
+  let splitLogic = 'Proportional';
+  if (rawSplit.includes('equal') || rawSplit.includes('50')) {
+    splitLogic = 'Equal';
+  } else if (rawSplit.includes('custom')) {
+    splitLogic = 'Custom';
+  } else if (rawSplit.includes('fixed') && rawSplit.includes('dollar')) {
+    splitLogic = 'Fixed Dollar';
+  } else {
+    splitLogic = 'Proportional';
+  }
+
+  const monthlyCost = Number(
+    exp.monthly_cost ?? exp.amount ?? exp.monthly_amount ?? exp.monthlyAmount ?? 0
   );
+
+  // Compute bunny_share and monkey_share based on partner income split
+  const bunnyRatio = partners
+    ? partners.bunny.netMonthlyIncome /
+      ((partners.bunny.netMonthlyIncome + partners.monkey.netMonthlyIncome) || 1)
+    : 7650 / 16100;
+  const monkeyRatio = 1 - bunnyRatio;
+
+  let bShare = 0;
+  let mShare = 0;
+
+  if (splitLogic === 'Proportional') {
+    bShare = monthlyCost * bunnyRatio;
+    mShare = monthlyCost * monkeyRatio;
+  } else if (splitLogic === 'Equal') {
+    bShare = monthlyCost * 0.5;
+    mShare = monthlyCost * 0.5;
+  } else if (splitLogic === 'Custom') {
+    const bPercent = (Number(exp.customBunnyPercent ?? exp.custom_bunny_percent) || 50) / 100;
+    bShare = monthlyCost * bPercent;
+    mShare = monthlyCost * (1 - bPercent);
+  } else if (splitLogic === 'Fixed Dollar') {
+    const fixedAmt = Math.max(0, Number(exp.fixedAmount ?? exp.fixed_amount ?? 0));
+    if (exp.fixedPayer === 'monkey') {
+      mShare = Math.min(monthlyCost, fixedAmt);
+      bShare = Math.max(0, monthlyCost - mShare);
+    } else {
+      bShare = Math.min(monthlyCost, fixedAmt);
+      mShare = Math.max(0, monthlyCost - bShare);
+    }
+  } else {
+    bShare = monthlyCost * bunnyRatio;
+    mShare = monthlyCost * monkeyRatio;
+  }
+
+  const bunny_share = Math.round(bShare * 100) / 100;
+  const monkey_share = Math.round(mShare * 100) / 100;
+
+  // If table columns have already been detected, build an exact-match row
+  if (knownExpenseColumns && knownExpenseColumns.size > 0) {
+    const row: Record<string, any> = { id: String(exp.id) };
+
+    // item vs name vs title
+    if (knownExpenseColumns.has('item')) {
+      row.item = title;
+    } else if (knownExpenseColumns.has('name')) {
+      row.name = title;
+    } else if (knownExpenseColumns.has('title')) {
+      row.title = title;
+    } else {
+      row.item = title;
+    }
+
+    if (knownExpenseColumns.has('category')) {
+      row.category = category;
+    }
+
+    // type vs is_fixed
+    if (knownExpenseColumns.has('type')) {
+      row.type = type;
+    } else if (knownExpenseColumns.has('is_fixed')) {
+      row.is_fixed = type === 'Fixed';
+    }
+
+    // split_logic vs split vs split_method
+    if (knownExpenseColumns.has('split_logic')) {
+      row.split_logic = splitLogic;
+    } else if (knownExpenseColumns.has('split')) {
+      row.split = splitLogic;
+    } else if (knownExpenseColumns.has('split_method')) {
+      row.split_method = splitLogic.toLowerCase();
+    } else {
+      row.split_logic = splitLogic;
+    }
+
+    // monthly_cost vs amount vs monthly_amount
+    if (knownExpenseColumns.has('monthly_cost')) {
+      row.monthly_cost = monthlyCost;
+    } else if (knownExpenseColumns.has('amount')) {
+      row.amount = monthlyCost;
+    } else if (knownExpenseColumns.has('monthly_amount')) {
+      row.monthly_amount = monthlyCost;
+    } else {
+      row.monthly_cost = monthlyCost;
+    }
+
+    // bunny_share and monkey_share
+    if (knownExpenseColumns.has('bunny_share')) {
+      row.bunny_share = bunny_share;
+    }
+    if (knownExpenseColumns.has('monkey_share')) {
+      row.monkey_share = monkey_share;
+    }
+
+    // NEVER include custom_bunny_percent or custom_monkey_percent
+    return row;
+  }
+
+  // Default exact schema: item, category, type, split_logic, monthly_cost, bunny_share, monkey_share
+  // Explicitly NO custom_bunny_percent or custom_monkey_percent
   return {
     id: String(exp.id),
-    title: String(exp.title || exp.name || '').trim(),
-    category: exp.category || 'Housing',
-    is_fixed: Boolean(exp.is_fixed ?? exp.isFixed ?? true),
-    monthly_amount: monthlyAmount,
-    split_method: exp.split_method || exp.splitMethod || 'proportional',
-    custom_bunny_percent: exp.custom_bunny_percent ?? exp.customBunnyPercent ?? null,
-    custom_monkey_percent: exp.custom_monkey_percent ?? exp.customMonkeyPercent ?? null,
-    fixed_payer: exp.fixed_payer ?? exp.fixedPayer ?? null,
-    fixed_amount: exp.fixed_amount ?? exp.fixedAmount ?? null,
-    notes: exp.notes ?? null,
+    item: title,
+    category,
+    type,
+    split_logic: splitLogic,
+    monthly_cost: monthlyCost,
+    bunny_share,
+    monkey_share,
   };
 }
 
@@ -354,7 +547,12 @@ export async function fetchHouseholdStateFromSupabase(): Promise<{
           : baseState.statementTransactions,
       expenses:
         !expensesRes.error && expensesRes.data
-          ? expensesRes.data.map(mapRowToExpense)
+          ? (() => {
+              if (expensesRes.data.length > 0) {
+                setKnownExpenseColumns(Object.keys(expensesRes.data[0]));
+              }
+              return expensesRes.data.map(mapRowToExpense);
+            })()
           : baseState.expenses,
       sinkingFunds:
         !sinkingFundsRes.error && sinkingFundsRes.data
@@ -395,20 +593,21 @@ export async function persistEntireStateToSupabase(state: HouseholdState): Promi
 
     // 3. Sync expenses table
     if (state.expenses && state.expenses.length > 0) {
-      const expRows = state.expenses.map(mapExpenseToRow);
-      const { error: expErr } = await supabase.from('expenses').upsert(expRows, {
-        onConflict: 'id',
-      });
-      if (expErr) {
-        console.error('[Supabase State Sync Error]: Failed to upsert expenses table:', expErr.message || expErr, { rows: expRows, error: expErr });
-        if (expErr.message?.includes('monthly_amount') || expErr.code === '42703') {
-          const fallbackExpRows = expRows.map((r) => {
-            const copy: Record<string, any> = { ...r, amount: r.monthly_amount };
-            delete copy.monthly_amount;
-            return copy;
-          });
-          await supabase.from('expenses').upsert(fallbackExpRows, { onConflict: 'id' });
+      try {
+        const expRows = state.expenses.map((exp) => mapExpenseToRow(exp, state.partners));
+        const { error: expErr } = await supabase.from('expenses').upsert(expRows, {
+          onConflict: 'id',
+        });
+        if (expErr) {
+          console.error('[Supabase State Sync Error]: Failed to batch upsert expenses table:', expErr.message || expErr, { rows: expRows, error: expErr });
+          for (const exp of state.expenses) {
+            await insertOrUpdateExpenseInSupabase(exp, state.partners).catch((itemErr) => {
+              console.error('[Supabase State Sync Expense Item Error]:', itemErr);
+            });
+          }
         }
+      } catch (expSyncErr) {
+        console.error('[Supabase State Sync Expenses Exception]:', expSyncErr);
       }
     }
 
@@ -647,30 +846,108 @@ export async function fetchCommittedTransactionsFromSupabase(): Promise<Statemen
 }
 
 /**
- * Real-time CRUD: Add or update a household expense directly in Supabase
+ * Real-time CRUD: Add or update a household expense directly in Supabase.
+ * Ensures payload matches table schema exactly (item or name, category, type, split_logic or split, monthly_cost or amount, bunny_share, monkey_share)
+ * and excludes custom_bunny_percent / custom_monkey_percent to avoid schema mismatch errors.
  */
-export async function insertOrUpdateExpenseInSupabase(expense: HouseholdExpense): Promise<void> {
+export async function insertOrUpdateExpenseInSupabase(
+  expense: HouseholdExpense,
+  partners?: { bunny: Partner; monkey: Partner }
+): Promise<void> {
   if (!isSupabaseConfigured()) return;
   try {
-    const row = mapExpenseToRow(expense);
-    const { error } = await supabase.from('expenses').upsert(row, { onConflict: 'id' });
-    if (error) {
-      console.error('[Supabase Expenses Upsert Error]:', error.message || error, { payload: row, error });
-      // If error is column monthly_amount does not exist, retry with amount
-      if (error.message?.includes('monthly_amount') || error.code === '42703') {
-        const fallbackRow: Record<string, any> = { ...row, amount: row.monthly_amount };
-        delete fallbackRow.monthly_amount;
-        const { error: fallbackErr } = await supabase.from('expenses').upsert(fallbackRow, { onConflict: 'id' });
-        if (fallbackErr) {
-          console.error('[Supabase Expenses Fallback Error]:', fallbackErr.message || fallbackErr, { payload: fallbackRow, error: fallbackErr });
-          throw fallbackErr;
+    // If table columns have not been detected yet, attempt a quick peek to learn existing column names
+    if (!knownExpenseColumns) {
+      try {
+        const { data: peekData } = await supabase.from('expenses').select('*').limit(1);
+        if (peekData && peekData.length > 0) {
+          setKnownExpenseColumns(Object.keys(peekData[0]));
         }
+      } catch (peekErr) {
+        // Non-fatal peek attempt
+      }
+    }
+
+    const primaryRow = mapExpenseToRow(expense, partners);
+
+    // Attempt 1: Upsert with mapped primary row
+    const { error: primaryError } = await supabase
+      .from('expenses')
+      .upsert(primaryRow, { onConflict: 'id' });
+
+    if (!primaryError) {
+      setKnownExpenseColumns(Object.keys(primaryRow));
+      return;
+    }
+
+    console.error('[Supabase Expenses Upsert Error]:', primaryError.message || primaryError, {
+      payload: primaryRow,
+      error: primaryError,
+    });
+
+    const errMsg = (primaryError.message || '').toLowerCase();
+    const isColumnError =
+      primaryError.code === '42703' ||
+      errMsg.includes('column') ||
+      errMsg.includes('does not exist');
+
+    if (isColumnError) {
+      // Attempt 2: Alternative column names (name instead of item, amount instead of monthly_cost, split instead of split_logic)
+      const altRow: Record<string, any> = {
+        id: primaryRow.id,
+        name: primaryRow.item || primaryRow.name || expense.title,
+        category: primaryRow.category,
+        type: primaryRow.type,
+        split: primaryRow.split_logic || primaryRow.split || 'Proportional',
+        amount: primaryRow.monthly_cost ?? primaryRow.amount ?? expense.monthlyAmount,
+        bunny_share: primaryRow.bunny_share,
+        monkey_share: primaryRow.monkey_share,
+      };
+
+      const { error: altError } = await supabase
+        .from('expenses')
+        .upsert(altRow, { onConflict: 'id' });
+
+      if (!altError) {
+        setKnownExpenseColumns(Object.keys(altRow));
         return;
       }
-      throw error;
+
+      console.error('[Supabase Expenses Alt Upsert Error]:', altError.message || altError, {
+        payload: altRow,
+        error: altError,
+      });
+
+      // Attempt 3: If a specific column name was flagged in the error, strip that column and retry
+      const missingMatch =
+        primaryError.message?.match(/column "([^"]+)"/i) ||
+        altError.message?.match(/column "([^"]+)"/i);
+
+      if (missingMatch && missingMatch[1]) {
+        const missingCol = missingMatch[1];
+        const strippedRow = { ...primaryRow };
+        delete strippedRow[missingCol];
+
+        const { error: stripErr } = await supabase
+          .from('expenses')
+          .upsert(strippedRow, { onConflict: 'id' });
+
+        if (!stripErr) {
+          setKnownExpenseColumns(Object.keys(strippedRow));
+          return;
+        }
+        console.error('[Supabase Expenses Stripped Upsert Error]:', stripErr.message || stripErr);
+      }
+
+      throw altError || primaryError;
     }
+
+    throw primaryError;
   } catch (err: any) {
-    console.error('[Supabase Expenses Insert/Update Exception]:', err?.message || err, { expense, err });
+    console.error('[Supabase Expenses Insert/Update Exception]:', err?.message || err, {
+      expense,
+      err,
+    });
     throw err;
   }
 }

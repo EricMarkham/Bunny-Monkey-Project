@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, useRef } from 'react';
 import {
   FileText,
   Upload,
@@ -15,9 +15,12 @@ import {
   Check,
   X,
   ArrowRight,
-  ShieldCheck,
   RefreshCw,
+  FileSpreadsheet,
+  FileCheck,
+  FileUp,
 } from 'lucide-react';
+import * as XLSX from 'xlsx';
 import {
   HouseholdState,
   StatementCategory,
@@ -83,6 +86,15 @@ export const CALENDAR_MONTHS = [
 
 const MIN_VALID_YEAR = 2026;
 const MAX_VALID_YEAR = 2036;
+
+/**
+ * Format bytes to readable string (e.g. 42.5 KB)
+ */
+function formatFileSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
 
 /**
  * Split CSV, TSV, or delimited line honoring quotes and whitespace
@@ -285,6 +297,17 @@ export function StatementParserModule({
   const [partnerFilter, setPartnerFilter] = useState<'all' | 'bunny' | 'monkey'>('all');
   const [successCommitMessage, setSuccessCommitMessage] = useState<string | null>(null);
 
+  // File upload state for CSV & Excel (.xlsx, .xls)
+  const [uploadedFile, setUploadedFile] = useState<{
+    name: string;
+    size: number;
+    type: string;
+    rowCount: number;
+  } | null>(null);
+  const [fileParseError, setFileParseError] = useState<string | null>(null);
+  const [isProcessingFile, setIsProcessingFile] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
   // Year validation logic: Must be between 2026 and 2036
   const parsedYearNum = parseInt(uploadYearInput.trim(), 10);
   const isYearValid =
@@ -423,8 +446,11 @@ export function StatementParserModule({
     text: string,
     statementPeriodChoice: string = effectiveTargetUploadPeriod,
     partnerChoice: 'bunny' | 'monkey' = selectedPartnerDefault
-  ) => {
-    if (!text.trim()) return;
+  ): number => {
+    if (!text.trim()) {
+      setParsedItems([]);
+      return 0;
+    }
     const lines = text.trim().split('\n');
     const newItems: StatementTransaction[] = [];
 
@@ -537,22 +563,84 @@ export function StatementParserModule({
     });
 
     setParsedItems(newItems);
+    return newItems.length;
+  };
+
+  /**
+   * Process uploaded CSV or Excel (.xlsx, .xls) file
+   */
+  const processFile = async (file: File) => {
+    if (!file) return;
+    if (!isYearValid) {
+      setFileParseError('Please specify a valid year (2026–2036) before uploading.');
+      return;
+    }
+
+    setIsProcessingFile(true);
+    setFileParseError(null);
+
+    const ext = file.name.split('.').pop()?.toLowerCase();
+    const isExcel = ext === 'xlsx' || ext === 'xls';
+
+    try {
+      let csvContent = '';
+
+      if (isExcel) {
+        const buffer = await file.arrayBuffer();
+        const workbook = XLSX.read(buffer, {
+          type: 'array',
+          cellDates: true,
+          dateNF: 'yyyy-mm-dd',
+        });
+        const sheetName = workbook.SheetNames[0];
+        if (!sheetName) {
+          throw new Error('Spreadsheet does not contain any readable sheets.');
+        }
+        const sheet = workbook.Sheets[sheetName];
+        csvContent = XLSX.utils.sheet_to_csv(sheet, { dateNF: 'yyyy-mm-dd', blankrows: false });
+      } else {
+        csvContent = await file.text();
+      }
+
+      if (!csvContent || !csvContent.trim()) {
+        throw new Error('The file is empty or contains no parseable rows.');
+      }
+
+      setRawText(csvContent);
+      const rowCount = handleParseText(csvContent, effectiveTargetUploadPeriod, selectedPartnerDefault);
+
+      setUploadedFile({
+        name: file.name,
+        size: file.size,
+        type: isExcel ? 'Excel' : 'CSV',
+        rowCount,
+      });
+    } catch (err: any) {
+      console.error('[File Upload Parsing Error]:', err);
+      setFileParseError(err?.message || 'Failed to read spreadsheet file. Please check file format.');
+    } finally {
+      setIsProcessingFile(false);
+      if (fileInputRef.current) {
+        fileInputRef.current.value = '';
+      }
+    }
   };
 
   // Drag and drop handler
-  const handleDrop = (e: React.DragEvent<HTMLDivElement>) => {
+  const handleDrop = (e: React.DragEvent<HTMLElement>) => {
     e.preventDefault();
     setIsDragging(false);
-    if (!isYearValid) return;
     const file = e.dataTransfer.files?.[0];
     if (file) {
-      const reader = new FileReader();
-      reader.onload = (event) => {
-        const content = event.target?.result as string;
-        setRawText(content);
-        handleParseText(content, effectiveTargetUploadPeriod, selectedPartnerDefault);
-      };
-      reader.readAsText(file);
+      processFile(file);
+    }
+  };
+
+  // File input change handler
+  const handleFileInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      processFile(file);
     }
   };
 
@@ -838,38 +926,6 @@ export function StatementParserModule({
     }));
     setEditingTxId(null);
     setEditAmountVal('');
-  };
-
-  // One-click repair: assign all transactions with July/August dates to August 2026 statement
-  const handleAssignAllToAugust2026 = () => {
-    const updated = activeTransactions.map((tx) => {
-      const cleanDate = normalizeDateToIso(tx.date, 2026);
-      if (cleanDate.includes('2026-07') || cleanDate.includes('2026-08') || !tx.statementPeriod) {
-        return {
-          ...tx,
-          date: cleanDate,
-          statementPeriod: '2026-08',
-        };
-      }
-      return {
-        ...tx,
-        date: cleanDate,
-      };
-    });
-
-    const sanitizedUpdated = sanitizeTransactions(updated);
-    setDbTransactions(sanitizedUpdated);
-    onUpdateState((prev) => ({
-      ...prev,
-      statementTransactions: sanitizedUpdated,
-    }));
-
-    // Persist healed transactions directly to Supabase
-    bulkInsertTransactionsInSupabase(sanitizedUpdated);
-
-    setSelectedPeriod('2026-08');
-    setSuccessCommitMessage('✓ All July and August transactions have been assigned to the August 2026 Statement and saved to Supabase!');
-    setTimeout(() => setSuccessCommitMessage(null), 5000);
   };
 
   // Filtered transactions for the ledger view
@@ -1250,79 +1306,199 @@ export function StatementParserModule({
 
           <div className="flex flex-col justify-between">
             <div>
-              <span className="text-slate-300 font-semibold block mb-1 text-xs 2xl:text-sm">Smart Columns Accepted:</span>
-              <p className="text-[11px] 2xl:text-xs text-slate-400">
+              <span className="text-slate-200 font-semibold block mb-1 text-xs 2xl:text-sm">Supported File Formats:</span>
+              <div className="flex items-center gap-1.5 flex-wrap text-[11px] 2xl:text-xs text-slate-300 mb-2">
+                <span className="px-1.5 py-0.5 rounded bg-white/5 border border-white/10 font-mono text-emerald-300">.CSV</span>
+                <span className="px-1.5 py-0.5 rounded bg-white/5 border border-white/10 font-mono text-emerald-300">.XLSX</span>
+                <span className="px-1.5 py-0.5 rounded bg-white/5 border border-white/10 font-mono text-emerald-300">.XLS</span>
+                <span className="px-1.5 py-0.5 rounded bg-white/5 border border-white/10 font-mono text-slate-300">Google Sheets</span>
+              </div>
+            </div>
+            <div>
+              <span className="text-slate-400 block text-[10px] 2xl:text-[11px] mb-0.5">Flexible Column Mapping:</span>
+              <p className="text-[10px] 2xl:text-[11px] text-slate-400">
                 <code className="text-indigo-300 font-mono">Date, Merchant, Category, Amount</code> or{' '}
                 <code className="text-indigo-300 font-mono">Date, Merchant, Amount, Category</code>
               </p>
             </div>
-            <button
-              id="btn-heal-july-august"
-              onClick={handleAssignAllToAugust2026}
-              className="mt-2 text-[11px] 2xl:text-xs font-semibold text-emerald-300 hover:text-emerald-200 bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/30 px-2.5 2xl:px-3 py-1 2xl:py-1.5 rounded-lg transition-colors text-left flex items-center gap-1"
-            >
-              <ShieldCheck className="w-3.5 h-3.5 2xl:w-4 2xl:h-4" />
-              <span>One-Click: Heal existing July/August to August 2026</span>
-            </button>
           </div>
         </div>
 
-        {/* Drop & Paste Area */}
-        <div
-          onDragOver={(e) => {
-            e.preventDefault();
-            setIsDragging(true);
-          }}
-          onDragLeave={() => setIsDragging(false)}
-          onDrop={handleDrop}
-          className={`border-2 border-dashed rounded-2xl p-4 2xl:p-6 text-center transition-all ${
-            isDragging
-              ? 'border-indigo-400 bg-indigo-950/40 shadow-inner'
-              : 'border-white/15 hover:border-white/30 bg-black/20'
-          }`}
-        >
-          <div className="max-w-2xl 2xl:max-w-3xl mx-auto space-y-2.5">
-            <textarea
-              rows={4}
-              value={rawText}
-              onChange={(e) => {
-                setRawText(e.target.value);
-                if (isYearValid) {
-                  handleParseText(e.target.value, effectiveTargetUploadPeriod, selectedPartnerDefault);
-                }
-              }}
-              placeholder="Paste Google Sheets / Excel columns here...&#10;e.g.&#10;24-Jul	FRESHCO #3875 MARKHAM	Groceries	$79.82&#10;27-Jul	PETRO-CANADA 00259 GORMLEY	Gas	$49.05"
-              className="w-full text-xs 2xl:text-sm font-mono px-3 2xl:px-4 py-2 2xl:py-3 rounded-xl border border-white/15 bg-slate-950/80 text-slate-200 placeholder-slate-500 focus:border-indigo-400 focus:outline-hidden"
+        {/* Dual Input Area: Drag & Drop File Upload + Direct Copy & Paste */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 2xl:gap-6">
+          {/* Input Method 1: Drag-and-Drop & File Input */}
+          <div className="flex flex-col">
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept=".csv,.xlsx,.xls,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel"
+              onChange={handleFileInputChange}
+              className="hidden"
+              id="statement-file-input"
             />
 
-            {rawText.trim() && (
-              <div className="flex justify-end gap-2">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setRawText('');
-                    setParsedItems([]);
-                  }}
-                  className="px-3 py-1 text-slate-400 hover:text-slate-200 text-xs 2xl:text-sm transition-colors"
-                >
-                  Clear Input
-                </button>
+            <div
+              onDragOver={(e) => {
+                e.preventDefault();
+                setIsDragging(true);
+              }}
+              onDragLeave={() => setIsDragging(false)}
+              onDrop={handleDrop}
+              onClick={() => fileInputRef.current?.click()}
+              className={`relative flex-1 min-h-[170px] 2xl:min-h-[190px] border-2 border-dashed rounded-2xl p-4 2xl:p-6 text-center cursor-pointer transition-all flex flex-col items-center justify-center ${
+                isDragging
+                  ? 'border-indigo-400 bg-indigo-950/60 ring-2 ring-indigo-400/50 shadow-inner'
+                  : 'border-white/15 hover:border-indigo-400/60 bg-black/25 hover:bg-slate-950/60'
+              }`}
+            >
+              {isProcessingFile ? (
+                <div className="flex flex-col items-center justify-center space-y-2 py-4">
+                  <RefreshCw className="w-8 h-8 text-indigo-400 animate-spin" />
+                  <p className="text-xs 2xl:text-sm font-semibold text-slate-200">Processing spreadsheet...</p>
+                  <p className="text-[11px] text-slate-400">Extracting and auto-categorizing rows</p>
+                </div>
+              ) : uploadedFile ? (
+                <div className="w-full flex flex-col items-center space-y-2.5 py-1" onClick={(e) => e.stopPropagation()}>
+                  <div className="w-10 h-10 2xl:w-12 2xl:h-12 rounded-xl bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 flex items-center justify-center">
+                    <FileCheck className="w-5 h-5 2xl:w-6 2xl:h-6" />
+                  </div>
+                  <div>
+                    <div className="flex items-center justify-center gap-1.5">
+                      <span className="text-xs 2xl:text-sm font-bold text-white truncate max-w-[240px] 2xl:max-w-[320px]">
+                        {uploadedFile.name}
+                      </span>
+                      <span className="px-1.5 py-0.2 rounded text-[10px] font-mono font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+                        {uploadedFile.type}
+                      </span>
+                    </div>
+                    <p className="text-[11px] 2xl:text-xs text-slate-400 mt-0.5">
+                      {formatFileSize(uploadedFile.size)} • <span className="text-emerald-300 font-semibold">{uploadedFile.rowCount} transactions</span> loaded into review
+                    </p>
+                  </div>
+
+                  <div className="flex items-center gap-2 pt-1">
+                    <button
+                      type="button"
+                      onClick={() => fileInputRef.current?.click()}
+                      className="px-3 py-1 text-xs font-semibold text-indigo-300 hover:text-indigo-200 bg-indigo-500/10 hover:bg-indigo-500/20 border border-indigo-500/30 rounded-lg transition-colors flex items-center gap-1"
+                    >
+                      <FileUp className="w-3.5 h-3.5" />
+                      <span>Choose Different File</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setUploadedFile(null);
+                        setRawText('');
+                        setParsedItems([]);
+                      }}
+                      className="px-2.5 py-1 text-xs text-slate-400 hover:text-rose-400 transition-colors"
+                    >
+                      Clear
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <div className="flex flex-col items-center space-y-2 py-2">
+                  <div className="w-10 h-10 2xl:w-12 2xl:h-12 rounded-xl bg-indigo-500/15 text-indigo-400 border border-indigo-500/25 flex items-center justify-center group-hover:scale-105 transition-transform">
+                    <Upload className="w-5 h-5 2xl:w-6 2xl:h-6" />
+                  </div>
+                  <div>
+                    <p className="text-xs 2xl:text-sm font-semibold text-slate-200">
+                      Drag &amp; drop CSV or Excel file here
+                    </p>
+                    <p className="text-[11px] 2xl:text-xs text-slate-400 mt-0.5">
+                      or click to browse from your device
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-1.5 pt-1">
+                    <span className="px-2 py-0.5 rounded-md bg-white/5 border border-white/10 text-[10px] 2xl:text-xs text-slate-300 font-mono">
+                      .CSV
+                    </span>
+                    <span className="px-2 py-0.5 rounded-md bg-white/5 border border-white/10 text-[10px] 2xl:text-xs text-slate-300 font-mono">
+                      .XLSX
+                    </span>
+                    <span className="px-2 py-0.5 rounded-md bg-white/5 border border-white/10 text-[10px] 2xl:text-xs text-slate-300 font-mono">
+                      .XLS
+                    </span>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {fileParseError && (
+              <div className="mt-2 flex items-center gap-1.5 text-rose-400 text-xs p-2 rounded-lg bg-rose-950/40 border border-rose-500/30">
+                <AlertCircle className="w-4 h-4 shrink-0" />
+                <span>{fileParseError}</span>
+              </div>
+            )}
+          </div>
+
+          {/* Input Method 2: Copy-and-Paste Text Area */}
+          <div className="flex flex-col justify-between rounded-2xl p-4 2xl:p-5 bg-black/25 border border-white/10">
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <label htmlFor="raw-statement-textarea" className="text-xs 2xl:text-sm font-semibold text-slate-200 flex items-center gap-1.5">
+                  <FileText className="w-3.5 h-3.5 text-indigo-400" />
+                  <span>Or Copy &amp; Paste Spreadsheet Rows</span>
+                </label>
+                {rawText.trim() && (
+                  <span className="text-[10px] 2xl:text-xs text-slate-400 font-mono">
+                    {rawText.trim().split('\n').length} lines
+                  </span>
+                )}
+              </div>
+
+              <textarea
+                id="raw-statement-textarea"
+                rows={5}
+                value={rawText}
+                onChange={(e) => {
+                  setRawText(e.target.value);
+                  if (isYearValid) {
+                    handleParseText(e.target.value, effectiveTargetUploadPeriod, selectedPartnerDefault);
+                  }
+                }}
+                placeholder="Paste Google Sheets / Excel columns here...&#10;e.g.&#10;24-Jul	FRESHCO #3875 MARKHAM	Groceries	$79.82&#10;27-Jul	PETRO-CANADA 00259 GORMLEY	Transport	$49.05"
+                className="w-full text-xs 2xl:text-sm font-mono px-3 2xl:px-4 py-2.5 rounded-xl border border-white/15 bg-slate-950/80 text-slate-200 placeholder-slate-500 focus:border-indigo-400 focus:outline-hidden"
+              />
+            </div>
+
+            <div className="flex items-center justify-between gap-2 mt-3 pt-2 border-t border-white/5">
+              <p className="text-[10px] 2xl:text-xs text-slate-400">
+                Auto-splits tabs, commas, and column orders.
+              </p>
+              <div className="flex items-center gap-2">
+                {rawText.trim() && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setRawText('');
+                      setUploadedFile(null);
+                      setParsedItems([]);
+                    }}
+                    className="px-2.5 py-1 text-slate-400 hover:text-slate-200 text-xs transition-colors"
+                  >
+                    Clear Input
+                  </button>
+                )}
                 <button
                   type="button"
                   id="btn-reparse-lines"
-                  disabled={!isYearValid}
+                  disabled={!isYearValid || !rawText.trim()}
                   onClick={() => handleParseText(rawText, effectiveTargetUploadPeriod, selectedPartnerDefault)}
-                  className={`px-4 2xl:px-5 py-1.5 2xl:py-2 rounded-xl font-semibold text-xs 2xl:text-sm transition-all shadow-md ${
-                    !isYearValid
-                      ? 'bg-slate-700 text-slate-400 cursor-not-allowed opacity-60'
+                  className={`px-3.5 2xl:px-4 py-1.5 rounded-lg font-semibold text-xs 2xl:text-sm transition-all shadow-sm flex items-center gap-1.5 ${
+                    !isYearValid || !rawText.trim()
+                      ? 'bg-slate-800 text-slate-500 cursor-not-allowed opacity-60'
                       : 'bg-indigo-600 hover:bg-indigo-500 text-white'
                   }`}
                   title={!isYearValid ? 'Please enter a valid year between 2026 and 2036' : 'Reparse lines'}
                 >
-                  Reparse Lines
+                  <RefreshCw className="w-3 h-3" />
+                  <span>Reparse Lines</span>
                 </button>
               </div>
-            )}
+            </div>
           </div>
         </div>
 

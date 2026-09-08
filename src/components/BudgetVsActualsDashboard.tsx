@@ -53,6 +53,7 @@ import {
   mapRowToTransaction,
   mapExpenseToRow,
   insertOrUpdateExpenseInSupabase,
+  setKnownExpenseColumns,
 } from '../services/supabaseService';
 import { supabase, isSupabaseConfigured } from '../lib/supabase';
 import { saveHouseholdState } from '../utils/storage';
@@ -153,6 +154,9 @@ export function BudgetVsActualsDashboard({
         }
       }
 
+      if (!expRes.error && expRes.data && expRes.data.length > 0) {
+        setKnownExpenseColumns(Object.keys(expRes.data[0]));
+      }
       const freshExpenses = !expRes.error && expRes.data ? expRes.data.map(mapRowToExpense) : null;
       const txData =
         !txRes.error && txRes.data && txRes.data.length > 0
@@ -337,16 +341,18 @@ export function BudgetVsActualsDashboard({
       // Persist directly to Supabase
       if (isSupabaseConfigured()) {
         try {
-          const rows = updatedExpenses.map(mapExpenseToRow);
+          const rows = updatedExpenses.map((exp) => mapExpenseToRow(exp, state.partners));
           const { error } = await supabase.from('expenses').upsert(rows, { onConflict: 'id' });
           if (error) {
-            console.warn('[Supabase Expenses Upsert Fallback]:', error);
+            console.error('[Supabase Expenses Upsert Error in BudgetVsActuals]:', error.message || error);
             for (const exp of updatedExpenses) {
-              await insertOrUpdateExpenseInSupabase(exp).catch(console.error);
+              await insertOrUpdateExpenseInSupabase(exp, state.partners).catch((e) => {
+                console.error('[Supabase Item Upsert Error in BudgetVsActuals]:', e);
+              });
             }
           }
         } catch (dbErr) {
-          console.error('Supabase DB Update Error:', dbErr);
+          console.error('[BudgetVsActuals] Supabase DB Update Error:', dbErr);
         }
       }
 
