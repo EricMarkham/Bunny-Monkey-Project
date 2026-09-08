@@ -117,13 +117,13 @@ export function TripSettlementModule({ state, onUpdateState }: TripSettlementMod
       ]);
 
       if (tripsRes.error) {
-        console.error('[Supabase Trips Select Error]:', tripsRes.error);
+        console.error('Supabase Error:', tripsRes.error);
       }
       if (expensesRes.error) {
-        console.error('[Supabase Trip Expenses Select Error]:', expensesRes.error);
+        console.error('Supabase Error:', expensesRes.error);
       }
       if (settlementsRes.error) {
-        console.error('[Supabase Trip Settlements Select Error]:', settlementsRes.error);
+        console.error('Supabase Error:', settlementsRes.error);
       }
 
       if (!tripsRes.error && tripsRes.data) {
@@ -147,7 +147,7 @@ export function TripSettlementModule({ state, onUpdateState }: TripSettlementMod
       setSyncStatus('✓ Trips synced');
       setTimeout(() => setSyncStatus(null), 3000);
     } catch (err: any) {
-      console.error('[Supabase Trips Sync Exception]:', err);
+      console.error('Supabase Error:', err);
       setDbError(err?.message || 'Failed to synchronize trips with Supabase');
     } finally {
       setIsSyncing(false);
@@ -179,15 +179,18 @@ export function TripSettlementModule({ state, onUpdateState }: TripSettlementMod
       if (isSupabaseConfigured()) {
         const { error } = await supabase.from('trips').delete().eq('id', tripId);
         if (error) {
-          console.error('[Supabase Trip Delete Error]:', error.message || error, { tripId });
+          console.error('Supabase Error:', error);
         }
-        await supabase.from('trip_expenses').delete().eq('trip_id', tripId);
+        const { error: expDelErr } = await supabase.from('trip_expenses').delete().eq('trip_id', tripId);
+        if (expDelErr) {
+          console.error('Supabase Error:', expDelErr);
+        }
       }
       await deleteTripFromSupabase(tripId);
       setSyncStatus('✓ Trip deleted from Supabase');
       setTimeout(() => setSyncStatus(null), 3000);
     } catch (err: any) {
-      console.error('[Supabase Trip Delete Exception]:', err);
+      console.error('Supabase Error:', err);
       setDbError(err?.message || 'Failed to delete trip from Supabase');
     }
     setTripToDelete(null);
@@ -272,7 +275,7 @@ export function TripSettlementModule({ state, onUpdateState }: TripSettlementMod
         const row = mapTripToRow(newTrip);
         const { error } = await supabase.from('trips').upsert(row, { onConflict: 'id' });
         if (error) {
-          console.error('[Supabase Trip Upsert Error]:', error.message || error, { row });
+          console.error('Supabase Error:', error);
           throw error;
         }
       }
@@ -280,7 +283,7 @@ export function TripSettlementModule({ state, onUpdateState }: TripSettlementMod
       setSyncStatus('✓ Trip created in Supabase');
       setTimeout(() => setSyncStatus(null), 3000);
     } catch (err: any) {
-      console.error('[Supabase Trip Create Exception]:', err);
+      console.error('Supabase Error:', err);
       setDbError(err?.message || 'Failed to create trip in Supabase');
     }
 
@@ -545,7 +548,7 @@ export function TripSettlementModule({ state, onUpdateState }: TripSettlementMod
         const row = mapTripExpenseToRow(newExpense);
         const { error } = await supabase.from('trip_expenses').upsert(row, { onConflict: 'id' });
         if (error) {
-          console.error('[Supabase Trip Expense Upsert Error]:', error.message || error, { row });
+          console.error('Supabase Error:', error);
           throw error;
         }
       }
@@ -559,7 +562,7 @@ export function TripSettlementModule({ state, onUpdateState }: TripSettlementMod
       setSyncStatus('✓ Trip expense saved to Supabase');
       setTimeout(() => setSyncStatus(null), 3000);
     } catch (err: any) {
-      console.error('[Supabase Trip Expense Add Exception]:', err);
+      console.error('Supabase Error:', err);
       setDbError(err?.message || 'Failed to save trip expense in Supabase');
     }
 
@@ -614,7 +617,7 @@ export function TripSettlementModule({ state, onUpdateState }: TripSettlementMod
         const row = mapTripExpenseToRow(updatedExpense);
         const { error } = await supabase.from('trip_expenses').upsert(row, { onConflict: 'id' });
         if (error) {
-          console.error('[Supabase Trip Expense Upsert Error]:', error.message || error, { row });
+          console.error('Supabase Error:', error);
         }
       }
       await insertOrUpdateTripExpenseInSupabase(updatedExpense);
@@ -627,7 +630,7 @@ export function TripSettlementModule({ state, onUpdateState }: TripSettlementMod
       setSyncStatus('✓ Trip expense updated in Supabase');
       setTimeout(() => setSyncStatus(null), 3000);
     } catch (err: any) {
-      console.error('[Supabase Trip Expense Toggle Exception]:', err);
+      console.error('Supabase Error:', err);
       setDbError(err?.message || 'Failed to update trip expense in Supabase');
     }
   };
@@ -642,14 +645,14 @@ export function TripSettlementModule({ state, onUpdateState }: TripSettlementMod
       if (isSupabaseConfigured()) {
         const { error } = await supabase.from('trip_expenses').delete().eq('id', id);
         if (error) {
-          console.error('[Supabase Trip Expense Delete Error]:', error.message || error, { id });
+          console.error('Supabase Error:', error);
         }
       }
       await deleteTripExpenseFromSupabase(id);
       setSyncStatus('✓ Trip expense deleted from Supabase');
       setTimeout(() => setSyncStatus(null), 3000);
     } catch (err: any) {
-      console.error('[Supabase Trip Expense Delete Exception]:', err);
+      console.error('Supabase Error:', err);
       setDbError(err?.message || 'Failed to delete trip expense from Supabase');
     }
   };
@@ -704,7 +707,10 @@ export function TripSettlementModule({ state, onUpdateState }: TripSettlementMod
         };
         if (isSupabaseConfigured()) {
           const row = mapTripExpenseToRow(updatedExp);
-          await supabase.from('trip_expenses').upsert(row, { onConflict: 'id' });
+          const { error: expUpsertErr } = await supabase.from('trip_expenses').upsert(row, { onConflict: 'id' });
+          if (expUpsertErr) {
+            console.error('Supabase Error:', expUpsertErr);
+          }
         }
         await insertOrUpdateTripExpenseInSupabase(updatedExp);
       }
@@ -715,7 +721,7 @@ export function TripSettlementModule({ state, onUpdateState }: TripSettlementMod
       setSyncStatus('✓ Sinking fund reimbursement saved to Supabase');
       setTimeout(() => setSyncStatus(null), 3000);
     } catch (err: any) {
-      console.error('[Supabase Reimbursement Exception]:', err);
+      console.error('Supabase Error:', err);
       setDbError(err?.message || 'Failed to save reimbursement to Supabase');
     }
 

@@ -77,7 +77,7 @@ export function mapHoldingToRow(h: DividendHolding): Record<string, any> {
 export function mapRowToTransaction(row: any): StatementTransaction {
   return {
     id: String(row.id),
-    date: row.date || '',
+    date: row.transaction_date || row.date || '',
     statementPeriod: row.statement_period || row.statementPeriod || undefined,
     merchant: row.merchant || '',
     rawCategory: row.raw_category || row.rawCategory || undefined,
@@ -92,12 +92,15 @@ export function mapRowToTransaction(row: any): StatementTransaction {
 }
 
 /**
- * Maps StatementTransaction to Supabase DB row format
+ * Maps StatementTransaction to Supabase DB row format.
+ * Defaults to `transaction_date` as the standard Supabase column name.
  */
-export function mapTransactionToRow(tx: StatementTransaction): Record<string, any> {
-  return {
+export function mapTransactionToRow(
+  tx: StatementTransaction,
+  useDateColumn = false
+): Record<string, any> {
+  const row: Record<string, any> = {
     id: tx.id,
-    date: tx.date,
     statement_period: tx.statementPeriod || null,
     merchant: tx.merchant,
     raw_category: tx.rawCategory || null,
@@ -108,8 +111,13 @@ export function mapTransactionToRow(tx: StatementTransaction): Record<string, an
     eco_category: tx.ecoCategory || 'Neutral',
     eco_tip: tx.ecoTip || null,
     is_recurring: Boolean(tx.isRecurring),
-    updated_at: new Date().toISOString(),
   };
+  if (useDateColumn) {
+    row.date = tx.date;
+  } else {
+    row.transaction_date = tx.date;
+  }
+  return row;
 }
 
 /**
@@ -210,8 +218,7 @@ export function mapTripToRow(trip: Trip): Record<string, any> {
     destination: trip.destination,
     start_date: trip.startDate,
     end_date: trip.endDate,
-    budget: trip.budget,
-    updated_at: new Date().toISOString(),
+    budget: Number(trip.budget) || 0,
   };
 }
 
@@ -225,7 +232,7 @@ export function mapRowToTripExpense(row: any): TripExpense {
     date: row.date || '',
     category: row.category || 'Misc',
     description: row.description || '',
-    totalCost: Number(row.total_cost ?? row.totalCost) || 0,
+    totalCost: Number(row.total_cost ?? row.totalCost ?? row.amount ?? row.cost) || 0,
     paidBy: row.paid_by || row.paidBy || 'bunny',
     splitRatio: row.split_ratio || row.splitRatio || '50/50',
     customBunnyPercent: row.custom_bunny_percent ?? row.customBunnyPercent,
@@ -253,7 +260,6 @@ export function mapTripExpenseToRow(te: TripExpense): Record<string, any> {
     sinking_fund_id: te.sinkingFundId ?? null,
     reimbursed_amount: te.reimbursedAmount ?? null,
     notes: te.notes ?? null,
-    updated_at: new Date().toISOString(),
   };
 }
 
@@ -355,16 +361,50 @@ export async function fetchHouseholdStateFromSupabase(): Promise<{
       // Fetch from 'transactions' table first, with fallback to 'statement_transactions'
       (async () => {
         try {
-          const res = await supabase.from('transactions').select('*');
+          let res = await supabase
+            .from('transactions')
+            .select('*')
+            .order('transaction_date', { ascending: false });
+
+          if (res.error) {
+            console.error('Supabase Error:', res.error);
+            res = await supabase
+              .from('transactions')
+              .select('*')
+              .order('date', { ascending: false });
+            if (res.error) {
+              console.error('Supabase Error:', res.error);
+              res = await supabase.from('transactions').select('*');
+            }
+          }
+
           if (!res.error && res.data && res.data.length > 0) {
             return res;
           }
-          const fallback = await supabase.from('statement_transactions').select('*');
+
+          let fallback = await supabase
+            .from('statement_transactions')
+            .select('*')
+            .order('transaction_date', { ascending: false });
+
+          if (fallback.error) {
+            console.error('Supabase Error:', fallback.error);
+            fallback = await supabase
+              .from('statement_transactions')
+              .select('*')
+              .order('date', { ascending: false });
+            if (fallback.error) {
+              console.error('Supabase Error:', fallback.error);
+              fallback = await supabase.from('statement_transactions').select('*');
+            }
+          }
+
           if (!fallback.error && fallback.data) {
             return fallback;
           }
           return res;
-        } catch {
+        } catch (err) {
+          console.error('Supabase Error:', err);
           return supabase.from('statement_transactions').select('*');
         }
       })(),
@@ -492,38 +532,64 @@ export async function persistEntireStateToSupabase(state: HouseholdState): Promi
 
     // 5. Sync statement transactions table
     if (state.statementTransactions && state.statementTransactions.length > 0) {
-      const rows = state.statementTransactions.map(mapTransactionToRow);
-      await Promise.allSettled([
-        supabase.from('transactions').upsert(rows, { onConflict: 'id' }),
-        supabase.from('statement_transactions').upsert(rows, { onConflict: 'id' }),
-      ]);
+      const rows = state.statementTransactions.map((tx) => mapTransactionToRow(tx, false));
+      const { error: txErr } = await supabase.from('transactions').upsert(rows, { onConflict: 'id' });
+      if (txErr) {
+        console.error('Supabase Error:', txErr);
+        if (txErr.message?.includes('transaction_date') || txErr.code === '42703') {
+          const fallbackRows = state.statementTransactions.map((tx) => mapTransactionToRow(tx, true));
+          const { error: fbErr } = await supabase.from('transactions').upsert(fallbackRows, { onConflict: 'id' });
+          if (fbErr) console.error('Supabase Error:', fbErr);
+        }
+      }
+
+      const { error: stErr } = await supabase.from('statement_transactions').upsert(rows, { onConflict: 'id' });
+      if (stErr) {
+        console.error('Supabase Error:', stErr);
+        if (stErr.message?.includes('transaction_date') || stErr.code === '42703') {
+          const fallbackRows = state.statementTransactions.map((tx) => mapTransactionToRow(tx, true));
+          const { error: fbErr } = await supabase.from('statement_transactions').upsert(fallbackRows, { onConflict: 'id' });
+          if (fbErr) console.error('Supabase Error:', fbErr);
+        }
+      }
     }
 
     // 6. Sync trips table
     if (state.trips && state.trips.length > 0) {
-      await supabase.from('trips').upsert(state.trips.map(mapTripToRow), {
+      const tripRows = state.trips.map(mapTripToRow);
+      const { error: tripsErr } = await supabase.from('trips').upsert(tripRows, {
         onConflict: 'id',
       });
+      if (tripsErr) {
+        console.error('Supabase Error:', tripsErr);
+      }
     }
 
     // 7. Sync trip expenses table
     if (state.tripExpenses && state.tripExpenses.length > 0) {
-      await supabase.from('trip_expenses').upsert(state.tripExpenses.map(mapTripExpenseToRow), {
+      const expRows = state.tripExpenses.map(mapTripExpenseToRow);
+      const { error: expErr } = await supabase.from('trip_expenses').upsert(expRows, {
         onConflict: 'id',
       });
+      if (expErr) {
+        console.error('Supabase Error:', expErr);
+      }
     }
 
     // 8. Sync trip settlements table
     if (state.tripSettlements && state.tripSettlements.length > 0) {
-      await supabase.from('trip_settlements').upsert(
+      const { error: setErr } = await supabase.from('trip_settlements').upsert(
         state.tripSettlements.map(mapTripSettlementToRow),
         { onConflict: 'id' }
       );
+      if (setErr) {
+        console.error('Supabase Error:', setErr);
+      }
     }
 
     return true;
   } catch (err) {
-    console.error('[Supabase] Error persisting state to Supabase:', err);
+    console.error('Supabase Error:', err);
     return false;
   }
 }
@@ -537,10 +603,10 @@ export async function insertOrUpdateHoldingInSupabase(holding: DividendHolding):
     const row = mapHoldingToRow(holding);
     const { error } = await supabase.from('holdings').upsert(row, { onConflict: 'id' });
     if (error) {
-      console.warn('[Supabase] Could not upsert into holdings table:', error.message);
+      console.error('Supabase Error:', error);
     }
   } catch (err) {
-    console.error('[Supabase] insertOrUpdateHolding error:', err);
+    console.error('Supabase Error:', err);
   }
 }
 
@@ -552,10 +618,10 @@ export async function deleteHoldingFromSupabase(holdingId: string): Promise<void
   try {
     const { error } = await supabase.from('holdings').delete().eq('id', holdingId);
     if (error) {
-      console.warn('[Supabase] Could not delete from holdings table:', error.message);
+      console.error('Supabase Error:', error);
     }
   } catch (err) {
-    console.error('[Supabase] deleteHolding error:', err);
+    console.error('Supabase Error:', err);
   }
 }
 
@@ -565,13 +631,28 @@ export async function deleteHoldingFromSupabase(holdingId: string): Promise<void
 export async function insertOrUpdateTransactionInSupabase(tx: StatementTransaction): Promise<void> {
   if (!isSupabaseConfigured()) return;
   try {
-    const row = mapTransactionToRow(tx);
-    await Promise.allSettled([
-      supabase.from('transactions').upsert(row, { onConflict: 'id' }),
-      supabase.from('statement_transactions').upsert(row, { onConflict: 'id' }),
-    ]);
+    const row = mapTransactionToRow(tx, false);
+    const { error: txErr } = await supabase.from('transactions').upsert(row, { onConflict: 'id' });
+    if (txErr) {
+      console.error('Supabase Error:', txErr);
+      if (txErr.message?.includes('transaction_date') || txErr.code === '42703') {
+        const fallbackRow = mapTransactionToRow(tx, true);
+        const { error: fbErr } = await supabase.from('transactions').upsert(fallbackRow, { onConflict: 'id' });
+        if (fbErr) console.error('Supabase Error:', fbErr);
+      }
+    }
+
+    const { error: stErr } = await supabase.from('statement_transactions').upsert(row, { onConflict: 'id' });
+    if (stErr) {
+      console.error('Supabase Error:', stErr);
+      if (stErr.message?.includes('transaction_date') || stErr.code === '42703') {
+        const fallbackRow = mapTransactionToRow(tx, true);
+        const { error: fbErr } = await supabase.from('statement_transactions').upsert(fallbackRow, { onConflict: 'id' });
+        if (fbErr) console.error('Supabase Error:', fbErr);
+      }
+    }
   } catch (err) {
-    console.error('[Supabase] insertOrUpdateTransaction error:', err);
+    console.error('Supabase Error:', err);
   }
 }
 
@@ -581,13 +662,28 @@ export async function insertOrUpdateTransactionInSupabase(tx: StatementTransacti
 export async function bulkInsertTransactionsInSupabase(txs: StatementTransaction[]): Promise<void> {
   if (!isSupabaseConfigured() || txs.length === 0) return;
   try {
-    const rows = txs.map(mapTransactionToRow);
-    await Promise.allSettled([
-      supabase.from('transactions').upsert(rows, { onConflict: 'id' }),
-      supabase.from('statement_transactions').upsert(rows, { onConflict: 'id' }),
-    ]);
+    const rows = txs.map((tx) => mapTransactionToRow(tx, false));
+    const { error: txErr } = await supabase.from('transactions').upsert(rows, { onConflict: 'id' });
+    if (txErr) {
+      console.error('Supabase Error:', txErr);
+      if (txErr.message?.includes('transaction_date') || txErr.code === '42703') {
+        const fallbackRows = txs.map((tx) => mapTransactionToRow(tx, true));
+        const { error: fbErr } = await supabase.from('transactions').upsert(fallbackRows, { onConflict: 'id' });
+        if (fbErr) console.error('Supabase Error:', fbErr);
+      }
+    }
+
+    const { error: stErr } = await supabase.from('statement_transactions').upsert(rows, { onConflict: 'id' });
+    if (stErr) {
+      console.error('Supabase Error:', stErr);
+      if (stErr.message?.includes('transaction_date') || stErr.code === '42703') {
+        const fallbackRows = txs.map((tx) => mapTransactionToRow(tx, true));
+        const { error: fbErr } = await supabase.from('statement_transactions').upsert(fallbackRows, { onConflict: 'id' });
+        if (fbErr) console.error('Supabase Error:', fbErr);
+      }
+    }
   } catch (err) {
-    console.error('[Supabase] bulkInsertTransactions error:', err);
+    console.error('Supabase Error:', err);
   }
 }
 
@@ -597,12 +693,12 @@ export async function bulkInsertTransactionsInSupabase(txs: StatementTransaction
 export async function deleteTransactionFromSupabase(txId: string): Promise<void> {
   if (!isSupabaseConfigured()) return;
   try {
-    await Promise.allSettled([
-      supabase.from('transactions').delete().eq('id', txId),
-      supabase.from('statement_transactions').delete().eq('id', txId),
-    ]);
+    const { error: txErr } = await supabase.from('transactions').delete().eq('id', txId);
+    if (txErr) console.error('Supabase Error:', txErr);
+    const { error: stErr } = await supabase.from('statement_transactions').delete().eq('id', txId);
+    if (stErr) console.error('Supabase Error:', stErr);
   } catch (err) {
-    console.error('[Supabase] deleteTransaction error:', err);
+    console.error('Supabase Error:', err);
   }
 }
 
@@ -612,21 +708,60 @@ export async function deleteTransactionFromSupabase(txId: string): Promise<void>
 export async function fetchCommittedTransactionsFromSupabase(): Promise<StatementTransaction[]> {
   if (!isSupabaseConfigured()) return [];
   try {
-    // 1. Primary: query 'transactions' table
-    const { data: txData, error: txError } = await supabase
+    // 1. Primary: query 'transactions' table ordering by 'transaction_date'
+    let { data: txData, error: txError } = await supabase
       .from('transactions')
       .select('*')
-      .order('date', { ascending: false });
+      .order('transaction_date', { ascending: false });
+
+    if (txError) {
+      console.error('Supabase Error:', txError);
+      // Fallback: retry with 'date' if transaction_date column doesn't exist
+      const retry = await supabase
+        .from('transactions')
+        .select('*')
+        .order('date', { ascending: false });
+      if (!retry.error && retry.data) {
+        txData = retry.data;
+        txError = null;
+      } else if (retry.error) {
+        console.error('Supabase Error:', retry.error);
+        const unconstrained = await supabase.from('transactions').select('*');
+        if (!unconstrained.error && unconstrained.data) {
+          txData = unconstrained.data;
+          txError = null;
+        }
+      }
+    }
 
     if (!txError && txData && txData.length > 0) {
       return sanitizeTransactions(txData.map(mapRowToTransaction));
     }
 
     // 2. Fallback: query 'statement_transactions' table
-    const { data: stData, error: stError } = await supabase
+    let { data: stData, error: stError } = await supabase
       .from('statement_transactions')
       .select('*')
-      .order('date', { ascending: false });
+      .order('transaction_date', { ascending: false });
+
+    if (stError) {
+      console.error('Supabase Error:', stError);
+      const retrySt = await supabase
+        .from('statement_transactions')
+        .select('*')
+        .order('date', { ascending: false });
+      if (!retrySt.error && retrySt.data) {
+        stData = retrySt.data;
+        stError = null;
+      } else if (retrySt.error) {
+        console.error('Supabase Error:', retrySt.error);
+        const unconstrainedSt = await supabase.from('statement_transactions').select('*');
+        if (!unconstrainedSt.error && unconstrainedSt.data) {
+          stData = unconstrainedSt.data;
+          stError = null;
+        }
+      }
+    }
 
     if (!stError && stData && stData.length > 0) {
       return sanitizeTransactions(stData.map(mapRowToTransaction));
@@ -638,7 +773,7 @@ export async function fetchCommittedTransactionsFromSupabase(): Promise<Statemen
 
     return [];
   } catch (err) {
-    console.warn('[Supabase] fetchCommittedTransactionsFromSupabase error:', err);
+    console.error('Supabase Error:', err);
     return [];
   }
 }
@@ -767,10 +902,10 @@ export async function insertOrUpdateTripInSupabase(trip: Trip): Promise<void> {
     const row = mapTripToRow(trip);
     const { error } = await supabase.from('trips').upsert(row, { onConflict: 'id' });
     if (error) {
-      console.warn('[Supabase] Could not upsert into trips table:', error.message);
+      console.error('Supabase Error:', error);
     }
   } catch (err) {
-    console.error('[Supabase] insertOrUpdateTrip error:', err);
+    console.error('Supabase Error:', err);
   }
 }
 
@@ -782,10 +917,10 @@ export async function deleteTripFromSupabase(tripId: string): Promise<void> {
   try {
     const { error } = await supabase.from('trips').delete().eq('id', tripId);
     if (error) {
-      console.warn('[Supabase] Could not delete from trips table:', error.message);
+      console.error('Supabase Error:', error);
     }
   } catch (err) {
-    console.error('[Supabase] deleteTrip error:', err);
+    console.error('Supabase Error:', err);
   }
 }
 
@@ -798,10 +933,10 @@ export async function insertOrUpdateTripExpenseInSupabase(expense: TripExpense):
     const row = mapTripExpenseToRow(expense);
     const { error } = await supabase.from('trip_expenses').upsert(row, { onConflict: 'id' });
     if (error) {
-      console.warn('[Supabase] Could not upsert into trip_expenses table:', error.message);
+      console.error('Supabase Error:', error);
     }
   } catch (err) {
-    console.error('[Supabase] insertOrUpdateTripExpense error:', err);
+    console.error('Supabase Error:', err);
   }
 }
 
@@ -813,10 +948,10 @@ export async function deleteTripExpenseFromSupabase(expenseId: string): Promise<
   try {
     const { error } = await supabase.from('trip_expenses').delete().eq('id', expenseId);
     if (error) {
-      console.warn('[Supabase] Could not delete from trip_expenses table:', error.message);
+      console.error('Supabase Error:', error);
     }
   } catch (err) {
-    console.error('[Supabase] deleteTripExpense error:', err);
+    console.error('Supabase Error:', err);
   }
 }
 
@@ -831,10 +966,10 @@ export async function insertOrUpdateTripSettlementInSupabase(
     const row = mapTripSettlementToRow(settlement);
     const { error } = await supabase.from('trip_settlements').upsert(row, { onConflict: 'id' });
     if (error) {
-      console.warn('[Supabase] Could not upsert into trip_settlements table:', error.message);
+      console.error('Supabase Error:', error);
     }
   } catch (err) {
-    console.error('[Supabase] insertOrUpdateTripSettlement error:', err);
+    console.error('Supabase Error:', err);
   }
 }
 

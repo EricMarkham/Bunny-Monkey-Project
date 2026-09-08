@@ -220,14 +220,39 @@ export function StatementParserModule({
       let { data, error } = await supabase
         .from('transactions')
         .select('*')
-        .order('date', { ascending: false });
+        .order('transaction_date', { ascending: false });
+
+      if (error) {
+        console.error('Supabase Error:', error);
+        const retryTx = await supabase
+          .from('transactions')
+          .select('*')
+          .order('date', { ascending: false });
+        if (!retryTx.error && retryTx.data) {
+          data = retryTx.data;
+          error = null;
+        } else if (retryTx.error) {
+          console.error('Supabase Error:', retryTx.error);
+        }
+      }
 
       if (error || !data || data.length === 0) {
         // Fallback to statement_transactions table
-        const fallback = await supabase
+        let fallback = await supabase
           .from('statement_transactions')
           .select('*')
-          .order('date', { ascending: false });
+          .order('transaction_date', { ascending: false });
+
+        if (fallback.error) {
+          console.error('Supabase Error:', fallback.error);
+          fallback = await supabase
+            .from('statement_transactions')
+            .select('*')
+            .order('date', { ascending: false });
+          if (fallback.error) {
+            console.error('Supabase Error:', fallback.error);
+          }
+        }
 
         if (!fallback.error && fallback.data) {
           data = fallback.data;
@@ -246,7 +271,7 @@ export function StatementParserModule({
         setTimeout(() => setSyncStatus(null), 3000);
       }
     } catch (err) {
-      console.warn('Sync error:', err);
+      console.error('Supabase Error:', err);
     } finally {
       setIsSyncing(false);
     }
@@ -404,22 +429,34 @@ export function StatementParserModule({
 
     // Requirement 1: Supabase Persistence on Commit
     // When the user clicks "Commit to Household Ledger", execute an immediate batch insert:
-    // await supabase.from('transactions').insert([...]) for all parsed rows.
+    // await supabase.from('transactions').upsert([...], { onConflict: 'id' }) for all parsed rows.
     if (isSupabaseConfigured() && rows.length > 0) {
       try {
-        const { error: insertErr } = await supabase.from('transactions').insert(rows);
+        const { error: insertErr } = await supabase.from('transactions').upsert(rows, { onConflict: 'id' });
         if (insertErr) {
-          console.warn('[Supabase] transactions.insert note, falling back to upsert:', insertErr.message);
-          await supabase.from('transactions').upsert(rows, { onConflict: 'id' });
+          console.error('Supabase Error:', insertErr);
+          if (insertErr.message?.includes('transaction_date') || insertErr.code === '42703') {
+            const fallbackRows = parsedItems.map((tx) => mapTransactionToRow(tx, true));
+            const { error: fbErr } = await supabase.from('transactions').upsert(fallbackRows, { onConflict: 'id' });
+            if (fbErr) console.error('Supabase Error:', fbErr);
+          }
         }
         // Mirror to statement_transactions table to guarantee full database consistency
         try {
-          await supabase.from('statement_transactions').upsert(rows, { onConflict: 'id' });
-        } catch {
-          // ignore secondary mirror error if already written to transactions
+          const { error: stErr } = await supabase.from('statement_transactions').upsert(rows, { onConflict: 'id' });
+          if (stErr) {
+            console.error('Supabase Error:', stErr);
+            if (stErr.message?.includes('transaction_date') || stErr.code === '42703') {
+              const fallbackRows = parsedItems.map((tx) => mapTransactionToRow(tx, true));
+              const { error: fbErr } = await supabase.from('statement_transactions').upsert(fallbackRows, { onConflict: 'id' });
+              if (fbErr) console.error('Supabase Error:', fbErr);
+            }
+          }
+        } catch (stCatchErr) {
+          console.error('Supabase Error:', stCatchErr);
         }
       } catch (err) {
-        console.error('[Supabase] Error executing batch insert into transactions table:', err);
+        console.error('Supabase Error:', err);
       }
     }
 
@@ -489,14 +526,16 @@ export function StatementParserModule({
     }));
     if (isSupabaseConfigured()) {
       try {
-        await supabase.from('transactions').delete().eq('id', id);
+        const { error: delTxErr } = await supabase.from('transactions').delete().eq('id', id);
+        if (delTxErr) console.error('Supabase Error:', delTxErr);
         try {
-          await supabase.from('statement_transactions').delete().eq('id', id);
-        } catch {
-          // ignore mirror error
+          const { error: delStErr } = await supabase.from('statement_transactions').delete().eq('id', id);
+          if (delStErr) console.error('Supabase Error:', delStErr);
+        } catch (stErr) {
+          console.error('Supabase Error:', stErr);
         }
       } catch (err) {
-        console.warn('[Supabase] direct transaction delete error:', err);
+        console.error('Supabase Error:', err);
       }
     }
     await deleteTransactionFromSupabase(id);
@@ -512,9 +551,10 @@ export function StatementParserModule({
       if (isSupabaseConfigured()) {
         try {
           const row = mapTransactionToRow(updatedTx);
-          await supabase.from('transactions').update(row).eq('id', id);
+          const { error: upErr } = await supabase.from('transactions').update(row).eq('id', id);
+          if (upErr) console.error('Supabase Error:', upErr);
         } catch (err) {
-          console.warn('[Supabase] direct transaction category update error:', err);
+          console.error('Supabase Error:', err);
         }
       }
       await insertOrUpdateTransactionInSupabase(updatedTx);
@@ -539,9 +579,10 @@ export function StatementParserModule({
       if (isSupabaseConfigured()) {
         try {
           const row = mapTransactionToRow(updatedTx);
-          await supabase.from('transactions').update(row).eq('id', id);
+          const { error: upErr } = await supabase.from('transactions').update(row).eq('id', id);
+          if (upErr) console.error('Supabase Error:', upErr);
         } catch (err) {
-          console.warn('[Supabase] direct transaction period update error:', err);
+          console.error('Supabase Error:', err);
         }
       }
       await insertOrUpdateTransactionInSupabase(updatedTx);
@@ -574,9 +615,10 @@ export function StatementParserModule({
       if (isSupabaseConfigured()) {
         try {
           const row = mapTransactionToRow(updatedTx);
-          await supabase.from('transactions').update(row).eq('id', id);
+          const { error: upErr } = await supabase.from('transactions').update(row).eq('id', id);
+          if (upErr) console.error('Supabase Error:', upErr);
         } catch (err) {
-          console.warn('[Supabase] direct transaction amount update error:', err);
+          console.error('Supabase Error:', err);
         }
       }
       await insertOrUpdateTransactionInSupabase(updatedTx);

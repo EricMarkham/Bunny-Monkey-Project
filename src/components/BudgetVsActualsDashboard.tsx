@@ -88,17 +88,43 @@ export function BudgetVsActualsDashboard({
     setIsSyncing(true);
     setSyncError(null);
     try {
-      const [expRes, txRes, stTxRes] = await Promise.all([
-        supabase.from('expenses').select('*'),
-        supabase.from('transactions').select('*').order('date', { ascending: false }),
-        supabase.from('statement_transactions').select('*').order('date', { ascending: false }),
-      ]);
-
+      const expRes = await supabase.from('expenses').select('*');
       if (expRes.error) {
-        console.error('[Supabase BudgetVsActuals Error]: Failed to fetch expenses:', expRes.error);
+        console.error('Supabase Error:', expRes.error);
       }
-      if (txRes.error && stTxRes.error) {
-        console.error('[Supabase BudgetVsActuals Error]: Failed to fetch transactions:', txRes.error || stTxRes.error);
+
+      let txRes = await supabase
+        .from('transactions')
+        .select('*')
+        .order('transaction_date', { ascending: false });
+
+      if (txRes.error) {
+        console.error('Supabase Error:', txRes.error);
+        txRes = await supabase
+          .from('transactions')
+          .select('*')
+          .order('date', { ascending: false });
+        if (txRes.error) {
+          console.error('Supabase Error:', txRes.error);
+          txRes = await supabase.from('transactions').select('*');
+        }
+      }
+
+      let stTxRes = await supabase
+        .from('statement_transactions')
+        .select('*')
+        .order('transaction_date', { ascending: false });
+
+      if (stTxRes.error) {
+        console.error('Supabase Error:', stTxRes.error);
+        stTxRes = await supabase
+          .from('statement_transactions')
+          .select('*')
+          .order('date', { ascending: false });
+        if (stTxRes.error) {
+          console.error('Supabase Error:', stTxRes.error);
+          stTxRes = await supabase.from('statement_transactions').select('*');
+        }
       }
 
       const freshExpenses = !expRes.error && expRes.data ? expRes.data.map(mapRowToExpense) : null;
