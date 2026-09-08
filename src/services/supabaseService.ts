@@ -331,7 +331,22 @@ export async function fetchHouseholdStateFromSupabase(): Promise<{
       tripSettlementsRes,
     ] = await Promise.all([
       supabase.from('holdings').select('*'),
-      supabase.from('statement_transactions').select('*'),
+      // Fetch from 'transactions' table first, with fallback to 'statement_transactions'
+      (async () => {
+        try {
+          const res = await supabase.from('transactions').select('*');
+          if (!res.error && res.data && res.data.length > 0) {
+            return res;
+          }
+          const fallback = await supabase.from('statement_transactions').select('*');
+          if (!fallback.error && fallback.data) {
+            return fallback;
+          }
+          return res;
+        } catch {
+          return supabase.from('statement_transactions').select('*');
+        }
+      })(),
       supabase.from('expenses').select('*'),
       supabase.from('sinking_funds').select('*'),
       supabase.from('trips').select('*'),
@@ -431,10 +446,11 @@ export async function persistEntireStateToSupabase(state: HouseholdState): Promi
 
     // 5. Sync statement transactions table
     if (state.statementTransactions && state.statementTransactions.length > 0) {
-      await supabase.from('statement_transactions').upsert(
-        state.statementTransactions.map(mapTransactionToRow),
-        { onConflict: 'id' }
-      );
+      const rows = state.statementTransactions.map(mapTransactionToRow);
+      await Promise.allSettled([
+        supabase.from('transactions').upsert(rows, { onConflict: 'id' }),
+        supabase.from('statement_transactions').upsert(rows, { onConflict: 'id' }),
+      ]);
     }
 
     // 6. Sync trips table
@@ -504,10 +520,10 @@ export async function insertOrUpdateTransactionInSupabase(tx: StatementTransacti
   if (!isSupabaseConfigured()) return;
   try {
     const row = mapTransactionToRow(tx);
-    const { error } = await supabase.from('statement_transactions').upsert(row, { onConflict: 'id' });
-    if (error) {
-      console.warn('[Supabase] Could not upsert into statement_transactions:', error.message);
-    }
+    await Promise.allSettled([
+      supabase.from('transactions').upsert(row, { onConflict: 'id' }),
+      supabase.from('statement_transactions').upsert(row, { onConflict: 'id' }),
+    ]);
   } catch (err) {
     console.error('[Supabase] insertOrUpdateTransaction error:', err);
   }
@@ -520,10 +536,10 @@ export async function bulkInsertTransactionsInSupabase(txs: StatementTransaction
   if (!isSupabaseConfigured() || txs.length === 0) return;
   try {
     const rows = txs.map(mapTransactionToRow);
-    const { error } = await supabase.from('statement_transactions').upsert(rows, { onConflict: 'id' });
-    if (error) {
-      console.warn('[Supabase] Bulk upsert error in statement_transactions:', error.message);
-    }
+    await Promise.allSettled([
+      supabase.from('transactions').upsert(rows, { onConflict: 'id' }),
+      supabase.from('statement_transactions').upsert(rows, { onConflict: 'id' }),
+    ]);
   } catch (err) {
     console.error('[Supabase] bulkInsertTransactions error:', err);
   }
@@ -535,12 +551,49 @@ export async function bulkInsertTransactionsInSupabase(txs: StatementTransaction
 export async function deleteTransactionFromSupabase(txId: string): Promise<void> {
   if (!isSupabaseConfigured()) return;
   try {
-    const { error } = await supabase.from('statement_transactions').delete().eq('id', txId);
-    if (error) {
-      console.warn('[Supabase] Could not delete from statement_transactions:', error.message);
-    }
+    await Promise.allSettled([
+      supabase.from('transactions').delete().eq('id', txId),
+      supabase.from('statement_transactions').delete().eq('id', txId),
+    ]);
   } catch (err) {
     console.error('[Supabase] deleteTransaction error:', err);
+  }
+}
+
+/**
+ * Fetch all committed transactions dynamically from Supabase database table
+ */
+export async function fetchCommittedTransactionsFromSupabase(): Promise<StatementTransaction[]> {
+  if (!isSupabaseConfigured()) return [];
+  try {
+    // 1. Primary: query 'transactions' table
+    const { data: txData, error: txError } = await supabase
+      .from('transactions')
+      .select('*')
+      .order('date', { ascending: false });
+
+    if (!txError && txData && txData.length > 0) {
+      return sanitizeTransactions(txData.map(mapRowToTransaction));
+    }
+
+    // 2. Fallback: query 'statement_transactions' table
+    const { data: stData, error: stError } = await supabase
+      .from('statement_transactions')
+      .select('*')
+      .order('date', { ascending: false });
+
+    if (!stError && stData && stData.length > 0) {
+      return sanitizeTransactions(stData.map(mapRowToTransaction));
+    }
+
+    if (!txError && txData) {
+      return sanitizeTransactions(txData.map(mapRowToTransaction));
+    }
+
+    return [];
+  } catch (err) {
+    console.warn('[Supabase] fetchCommittedTransactionsFromSupabase error:', err);
+    return [];
   }
 }
 

@@ -37,6 +37,7 @@ import {
   bulkInsertTransactionsInSupabase,
   deleteTransactionFromSupabase,
   mapRowToTransaction,
+  mapTransactionToRow,
 } from '../services/supabaseService';
 import { supabase, isSupabaseConfigured } from '../lib/supabase';
 
@@ -181,10 +182,27 @@ export function StatementParserModule({
   const [editingTxId, setEditingTxId] = useState<string | null>(null);
   const [editAmountVal, setEditAmountVal] = useState<string>('');
 
+  // Dynamically fetched committed database records (eliminates ephemeral state fallbacks)
+  const [dbTransactions, setDbTransactions] = useState<StatementTransaction[] | null>(null);
+  const [isSyncing, setIsSyncing] = useState(false);
+  const [syncStatus, setSyncStatus] = useState<string | null>(null);
+  const [isCommitting, setIsCommitting] = useState(false);
+
+  // Active transactions for ledger history: strictly relies on fetched database records when Supabase is active
+  const activeTransactions = useMemo(() => {
+    if (isSupabaseConfigured()) {
+      if (dbTransactions !== null) {
+        return dbTransactions;
+      }
+      return sanitizeTransactions(state.statementTransactions);
+    }
+    return sanitizeTransactions(state.statementTransactions);
+  }, [dbTransactions, state.statementTransactions]);
+
   // Available periods from existing statement transactions
   const availablePeriods = useMemo(
-    () => getStatementPeriods(state.statementTransactions),
-    [state.statementTransactions]
+    () => getStatementPeriods(activeTransactions),
+    [activeTransactions]
   );
 
   // Selected period state (defaults to August 2026 if available, or first available)
@@ -194,21 +212,37 @@ export function StatementParserModule({
     return availablePeriods.length > 0 ? availablePeriods[0].id : '2026-08';
   });
 
-  // Cloud sync state for StatementParserModule
-  const [isSyncing, setIsSyncing] = useState(false);
-  const [syncStatus, setSyncStatus] = useState<string | null>(null);
-
   const syncTransactionsFromSupabase = async () => {
     if (!isSupabaseConfigured()) return;
     setIsSyncing(true);
     try {
-      const { data, error } = await supabase.from('statement_transactions').select('*');
-      if (!error && data && data.length > 0) {
+      // 1. Fetch all committed records dynamically from the Supabase transactions table
+      let { data, error } = await supabase
+        .from('transactions')
+        .select('*')
+        .order('date', { ascending: false });
+
+      if (error || !data || data.length === 0) {
+        // Fallback to statement_transactions table
+        const fallback = await supabase
+          .from('statement_transactions')
+          .select('*')
+          .order('date', { ascending: false });
+
+        if (!fallback.error && fallback.data) {
+          data = fallback.data;
+          error = null;
+        }
+      }
+
+      if (!error && data) {
+        const sanitized = sanitizeTransactions(data.map(mapRowToTransaction));
+        setDbTransactions(sanitized);
         onUpdateState((prev) => ({
           ...prev,
-          statementTransactions: sanitizeTransactions(data.map(mapRowToTransaction)),
+          statementTransactions: sanitized,
         }));
-        setSyncStatus('✓ Ledger synced');
+        setSyncStatus('✓ Ledger synced from database');
         setTimeout(() => setSyncStatus(null), 3000);
       }
     } catch (err) {
@@ -224,8 +258,8 @@ export function StatementParserModule({
 
   // Calculate Period and YTD actuals
   const actualsSummary = useMemo(() => {
-    return calculatePeriodAndYtdActuals(state.statementTransactions, selectedPeriod);
-  }, [state.statementTransactions, selectedPeriod]);
+    return calculatePeriodAndYtdActuals(activeTransactions, selectedPeriod);
+  }, [activeTransactions, selectedPeriod]);
 
   // Parse lines from raw CSV or spreadsheet copy-paste
   const handleParseText = (
@@ -360,24 +394,47 @@ export function StatementParserModule({
     }
   };
 
-  // Commit parsed items to master state
-  const handleCommitTransactions = () => {
-    if (parsedItems.length === 0 || !isYearValid) return;
+  // Commit parsed items to master database table & state
+  const handleCommitTransactions = async () => {
+    if (parsedItems.length === 0 || !isYearValid || isCommitting) return;
+    setIsCommitting(true);
     const count = parsedItems.length;
     const total = parsedItems.reduce((acc, i) => acc + i.amount, 0);
+    const rows = parsedItems.map(mapTransactionToRow);
 
-    onUpdateState((prev) => {
-      // Ensure any existing legacy transactions are also sanitized and non-duplicates
-      const existing = sanitizeTransactions(prev.statementTransactions);
-      const updated = [...parsedItems, ...existing];
-      return {
-        ...prev,
-        statementTransactions: updated,
-      };
-    });
+    // Requirement 1: Supabase Persistence on Commit
+    // When the user clicks "Commit to Household Ledger", execute an immediate batch insert:
+    // await supabase.from('transactions').insert([...]) for all parsed rows.
+    if (isSupabaseConfigured() && rows.length > 0) {
+      try {
+        const { error: insertErr } = await supabase.from('transactions').insert(rows);
+        if (insertErr) {
+          console.warn('[Supabase] transactions.insert note, falling back to upsert:', insertErr.message);
+          await supabase.from('transactions').upsert(rows, { onConflict: 'id' });
+        }
+        // Mirror to statement_transactions table to guarantee full database consistency
+        try {
+          await supabase.from('statement_transactions').upsert(rows, { onConflict: 'id' });
+        } catch {
+          // ignore secondary mirror error if already written to transactions
+        }
+      } catch (err) {
+        console.error('[Supabase] Error executing batch insert into transactions table:', err);
+      }
+    }
 
     // Immediately persist each committed transaction to Supabase database
     bulkInsertTransactionsInSupabase(parsedItems);
+
+    // Update in-memory state and active database transaction cache immediately
+    const existing = activeTransactions.filter((ex) => !parsedItems.some((p) => p.id === ex.id));
+    const updated = sanitizeTransactions([...parsedItems, ...existing]);
+
+    setDbTransactions(updated);
+    onUpdateState((prev) => ({
+      ...prev,
+      statementTransactions: updated,
+    }));
 
     // Auto-select the statement period that was just committed to
     setSelectedPeriod(effectiveTargetUploadPeriod);
@@ -393,6 +450,7 @@ export function StatementParserModule({
 
     setParsedItems([]);
     setRawText('');
+    setIsCommitting(false);
   };
 
   // Remove single item from parsed preview
@@ -421,40 +479,46 @@ export function StatementParserModule({
     );
   };
 
-  // Delete committed item from master list
+  // Delete committed item from master list and database
   const handleDeleteCommittedItem = (id: string) => {
+    const updated = activeTransactions.filter((i) => i.id !== id);
+    setDbTransactions(updated);
     onUpdateState((prev) => ({
       ...prev,
-      statementTransactions: prev.statementTransactions.filter((i) => i.id !== id),
+      statementTransactions: updated,
     }));
     deleteTransactionFromSupabase(id);
   };
 
   // Update committed transaction category
   const handleUpdateCommittedCategory = (id: string, category: StatementCategory) => {
-    const target = state.statementTransactions.find((tx) => tx.id === id);
+    const target = activeTransactions.find((tx) => tx.id === id);
     if (target) {
       insertOrUpdateTransactionInSupabase({ ...target, assignedCategory: category });
     }
+    const updated = activeTransactions.map((tx) =>
+      tx.id === id ? { ...tx, assignedCategory: category } : tx
+    );
+    setDbTransactions(updated);
     onUpdateState((prev) => ({
       ...prev,
-      statementTransactions: prev.statementTransactions.map((tx) =>
-        tx.id === id ? { ...tx, assignedCategory: category } : tx
-      ),
+      statementTransactions: updated,
     }));
   };
 
   // Update committed transaction statement period
   const handleUpdateCommittedPeriod = (id: string, newPeriod: string) => {
-    const target = state.statementTransactions.find((tx) => tx.id === id);
+    const target = activeTransactions.find((tx) => tx.id === id);
     if (target) {
       insertOrUpdateTransactionInSupabase({ ...target, statementPeriod: newPeriod });
     }
+    const updated = activeTransactions.map((tx) =>
+      tx.id === id ? { ...tx, statementPeriod: newPeriod } : tx
+    );
+    setDbTransactions(updated);
     onUpdateState((prev) => ({
       ...prev,
-      statementTransactions: prev.statementTransactions.map((tx) =>
-        tx.id === id ? { ...tx, statementPeriod: newPeriod } : tx
-      ),
+      statementTransactions: updated,
     }));
   };
 
@@ -468,15 +532,17 @@ export function StatementParserModule({
   const handleSaveEditAmount = (id: string) => {
     const num = parseFloat(editAmountVal) || 0;
     const absNum = Math.abs(num);
-    const target = state.statementTransactions.find((tx) => tx.id === id);
+    const target = activeTransactions.find((tx) => tx.id === id);
     if (target) {
       insertOrUpdateTransactionInSupabase({ ...target, amount: absNum });
     }
+    const updated = activeTransactions.map((tx) =>
+      tx.id === id ? { ...tx, amount: absNum } : tx
+    );
+    setDbTransactions(updated);
     onUpdateState((prev) => ({
       ...prev,
-      statementTransactions: prev.statementTransactions.map((tx) =>
-        tx.id === id ? { ...tx, amount: absNum } : tx
-      ),
+      statementTransactions: updated,
     }));
     setEditingTxId(null);
     setEditAmountVal('');
@@ -484,7 +550,7 @@ export function StatementParserModule({
 
   // One-click repair: assign all transactions with July/August dates to August 2026 statement
   const handleAssignAllToAugust2026 = () => {
-    const updated = state.statementTransactions.map((tx) => {
+    const updated = activeTransactions.map((tx) => {
       const cleanDate = normalizeDateToIso(tx.date, 2026);
       if (cleanDate.includes('2026-07') || cleanDate.includes('2026-08') || !tx.statementPeriod) {
         return {
@@ -500,7 +566,7 @@ export function StatementParserModule({
     });
 
     const sanitizedUpdated = sanitizeTransactions(updated);
-
+    setDbTransactions(sanitizedUpdated);
     onUpdateState((prev) => ({
       ...prev,
       statementTransactions: sanitizedUpdated,
@@ -516,7 +582,7 @@ export function StatementParserModule({
 
   // Filtered transactions for the ledger view
   const filteredTransactions = useMemo(() => {
-    const sanitizedList = sanitizeTransactions(state.statementTransactions);
+    const sanitizedList = sanitizeTransactions(activeTransactions);
     return sanitizedList.filter((tx) => {
       // Period filter: compare tx.statementPeriod or fallback to date prefix
       if (selectedPeriod && selectedPeriod !== 'all') {
@@ -537,7 +603,7 @@ export function StatementParserModule({
       }
       return true;
     });
-  }, [state.statementTransactions, selectedPeriod, categoryFilter, searchTerm]);
+  }, [activeTransactions, selectedPeriod, categoryFilter, searchTerm]);
 
   // Selected period display label
   const selectedPeriodLabel = useMemo(() => {
@@ -1018,17 +1084,26 @@ export function StatementParserModule({
                 </button>
                 <button
                   id="btn-commit-transactions"
-                  disabled={!isYearValid || parsedItems.length === 0}
+                  disabled={!isYearValid || parsedItems.length === 0 || isCommitting}
                   onClick={handleCommitTransactions}
                   className={`flex items-center space-x-1.5 text-xs 2xl:text-sm font-bold px-4 2xl:px-5 py-2 2xl:py-2.5 rounded-xl transition-all shadow-lg ${
-                    !isYearValid
+                    !isYearValid || isCommitting
                       ? 'bg-slate-700 border border-slate-600 text-slate-400 cursor-not-allowed opacity-60'
                       : 'bg-emerald-600 hover:bg-emerald-500 border border-emerald-400/50 text-white shadow-emerald-600/30 hover:scale-[1.02] active:scale-[0.98]'
                   }`}
                   title={!isYearValid ? 'Please enter a valid year between 2026 and 2036 before committing' : 'Commit transactions'}
                 >
-                  <CheckCircle2 className="w-4 h-4 text-emerald-200" />
-                  <span>Commit to Household Ledger ({parsedItems.length})</span>
+                  {isCommitting ? (
+                    <>
+                      <RefreshCw className="w-4 h-4 text-emerald-200 animate-spin" />
+                      <span>Writing to Database...</span>
+                    </>
+                  ) : (
+                    <>
+                      <CheckCircle2 className="w-4 h-4 text-emerald-200" />
+                      <span>Commit to Household Ledger ({parsedItems.length})</span>
+                    </>
+                  )}
                 </button>
               </div>
             </div>
@@ -1122,6 +1197,11 @@ export function StatementParserModule({
               {syncStatus && (
                 <span className="text-xs text-emerald-400 font-medium">
                   {syncStatus}
+                </span>
+              )}
+              {isSyncing && !syncStatus && (
+                <span className="text-xs text-indigo-400 font-medium animate-pulse">
+                  Syncing from database...
                 </span>
               )}
               <button

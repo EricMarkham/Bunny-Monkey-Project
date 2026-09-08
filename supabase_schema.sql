@@ -31,8 +31,24 @@ CREATE TABLE IF NOT EXISTS public.holdings (
     updated_at TIMESTAMPTZ DEFAULT timezone('utc'::text, now()) NOT NULL
 );
 
--- 3. Statement Transactions Table
+-- 3. Statement Transactions Table (Supported as both statement_transactions and transactions)
 CREATE TABLE IF NOT EXISTS public.statement_transactions (
+    id TEXT PRIMARY KEY,
+    date TEXT NOT NULL,
+    statement_period TEXT,
+    merchant TEXT NOT NULL,
+    raw_category TEXT,
+    assigned_category TEXT NOT NULL,
+    amount NUMERIC NOT NULL DEFAULT 0,
+    partner TEXT NOT NULL DEFAULT 'joint',
+    carbon_estimate_kg NUMERIC DEFAULT 0,
+    eco_category TEXT DEFAULT 'Neutral',
+    eco_tip TEXT,
+    is_recurring BOOLEAN DEFAULT false,
+    updated_at TIMESTAMPTZ DEFAULT timezone('utc'::text, now()) NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS public.transactions (
     id TEXT PRIMARY KEY,
     date TEXT NOT NULL,
     statement_period TEXT,
@@ -136,6 +152,7 @@ CREATE TABLE IF NOT EXISTS public.settings (
 ALTER TABLE public.household_state ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.holdings ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.statement_transactions ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.transactions ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.expenses ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.sinking_funds ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.trips ENABLE ROW LEVEL SECURITY;
@@ -153,8 +170,11 @@ BEGIN
     IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE policyname = 'Public Access Holdings') THEN
         CREATE POLICY "Public Access Holdings" ON public.holdings FOR ALL USING (true) WITH CHECK (true);
     END IF;
-    IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE policyname = 'Public Access Transactions') THEN
-        CREATE POLICY "Public Access Transactions" ON public.statement_transactions FOR ALL USING (true) WITH CHECK (true);
+    IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE policyname = 'Public Access Statement Transactions') THEN
+        CREATE POLICY "Public Access Statement Transactions" ON public.statement_transactions FOR ALL USING (true) WITH CHECK (true);
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE policyname = 'Public Access Transactions Table') THEN
+        CREATE POLICY "Public Access Transactions Table" ON public.transactions FOR ALL USING (true) WITH CHECK (true);
     END IF;
     IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE policyname = 'Public Access Expenses') THEN
         CREATE POLICY "Public Access Expenses" ON public.expenses FOR ALL USING (true) WITH CHECK (true);
