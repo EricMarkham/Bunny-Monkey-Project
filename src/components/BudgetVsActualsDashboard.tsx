@@ -54,6 +54,7 @@ import {
   mapExpenseToRow,
   insertOrUpdateExpenseInSupabase,
   setKnownExpenseColumns,
+  generateUUID,
 } from '../services/supabaseService';
 import { supabase, isSupabaseConfigured } from '../lib/supabase';
 import { saveHouseholdState } from '../utils/storage';
@@ -318,7 +319,7 @@ export function BudgetVsActualsDashboard({
         } else {
           const catConfig = STANDARD_BUDGET_CATEGORIES.find((c) => c.key === catKey);
           const newExp: HouseholdExpense = {
-            id: `exp-${catKey.toLowerCase()}-${Date.now()}`,
+            id: generateUUID(),
             title: catConfig?.label || `${catKey} Target`,
             category: catKey as any,
             isFixed: false,

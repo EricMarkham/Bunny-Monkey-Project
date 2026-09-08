@@ -7,6 +7,7 @@ import {
   fetchSnapshotsFromSupabase,
   saveSnapshotToSupabase,
   deleteSnapshotFromSupabase,
+  ensureValidUUID,
 } from '../services/supabaseService';
 import type { StateSnapshot } from '../services/supabaseService';
 import { isSupabaseConfigured } from '../lib/supabase';
@@ -32,7 +33,12 @@ export function sanitizeAndMigrateState(parsed: any): HouseholdState {
       bunny: { ...initialHouseholdState.partners.bunny, ...(parsed.partners?.bunny || {}) },
       monkey: { ...initialHouseholdState.partners.monkey, ...(parsed.partners?.monkey || {}) },
     },
-    expenses: Array.isArray(parsed.expenses) ? parsed.expenses : initialHouseholdState.expenses,
+    expenses: (Array.isArray(parsed.expenses) ? parsed.expenses : initialHouseholdState.expenses).map(
+      (exp: any) => ({
+        ...exp,
+        id: ensureValidUUID(exp?.id),
+      })
+    ),
     sinkingFunds: Array.isArray(parsed.sinkingFunds)
       ? parsed.sinkingFunds
       : initialHouseholdState.sinkingFunds,

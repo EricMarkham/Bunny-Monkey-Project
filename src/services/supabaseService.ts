@@ -137,6 +137,56 @@ export function mapTransactionToRow(
 }
 
 /**
+ * UUID Validation and Generation Helpers
+ * Ensures IDs strictly conform to PostgreSQL's UUID type to prevent
+ * "invalid input syntax for type uuid" errors.
+ */
+export function isValidUUID(str?: string): boolean {
+  if (!str || typeof str !== 'string') return false;
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(str.trim());
+}
+
+export function generateUUID(): string {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID();
+  }
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
+    const r = (Math.random() * 16) | 0;
+    const v = c === 'x' ? r : (r & 0x3) | 0x8;
+    return v.toString(16);
+  });
+}
+
+/**
+ * Ensures an ID is a valid PostgreSQL UUID. If already a valid UUID, returns it.
+ * If legacy string (e.g. 'exp-1', 'exp-1788861345604'), deterministically converts to a valid RFC4122 v4 UUID format
+ * so PostgreSQL never throws "invalid input syntax for type uuid".
+ */
+export function ensureValidUUID(id?: string): string {
+  if (id && isValidUUID(id)) {
+    return id.trim();
+  }
+  if (!id || typeof id !== 'string' || !id.trim()) {
+    return generateUUID();
+  }
+  // Deterministic conversion from string to valid RFC4122 v4 UUID format
+  let h1 = 0xdeadbeef, h2 = 0x41c6ce57, h3 = 0x811c9dc5, h4 = 0x9e3779b9;
+  for (let i = 0; i < id.length; i++) {
+    const ch = id.charCodeAt(i);
+    h1 = Math.imul(h1 ^ ch, 2654435761);
+    h2 = Math.imul(h2 ^ ch, 1597334677);
+    h3 = Math.imul(h3 ^ ch, 3812015801);
+    h4 = Math.imul(h4 ^ ch, 2718281829);
+  }
+  const p1 = (h1 >>> 0).toString(16).padStart(8, '0').slice(-8);
+  const p2 = ((h2 >>> 0) & 0xffff).toString(16).padStart(4, '0').slice(-4);
+  const p3 = '4' + (((h2 >>> 16) & 0x0fff).toString(16).padStart(3, '0').slice(-3));
+  const p4 = ((8 + ((h3 >>> 0) & 0x3)).toString(16)) + (((h3 >>> 4) & 0x0fff).toString(16).padStart(3, '0').slice(-3));
+  const p5 = ((h4 >>> 0).toString(16).padStart(8, '0') + ((h1 ^ h2 ^ h3) >>> 0).toString(16).padStart(4, '0')).slice(-12);
+  return `${p1}-${p2}-${p3}-${p4}-${p5}`.toLowerCase();
+}
+
+/**
  * Exact schema for Supabase 'expenses' table to ensure zero schema mismatch errors.
  * Required columns: id, item, category, type, split_logic, monthly_cost, bunny_share, monkey_share
  */
@@ -233,7 +283,7 @@ export function mapExpenseToRow(
   exp: any,
   partners?: { bunny: Partner; monkey: Partner }
 ): SupabaseExpenseRow {
-  const id = String(exp.id || `exp-${Date.now()}`).trim();
+  const id = ensureValidUUID(String(exp.id || ''));
   const title = String(exp.item || exp.name || exp.title || '').trim();
   const category = String(exp.category || 'Housing');
   const type =
@@ -850,7 +900,8 @@ export async function insertOrUpdateExpenseInSupabase(
 export async function deleteExpenseFromSupabase(expenseId: string): Promise<void> {
   if (!isSupabaseConfigured()) return;
   try {
-    const { error } = await supabase.from('expenses').delete().eq('id', expenseId);
+    const validId = ensureValidUUID(expenseId);
+    const { error } = await supabase.from('expenses').delete().eq('id', validId);
     if (error) {
       console.error("Expense Save Error:", error);
       throw error;

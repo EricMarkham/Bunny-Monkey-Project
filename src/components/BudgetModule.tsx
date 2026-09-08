@@ -50,6 +50,8 @@ import {
   mapSinkingFundToRow,
   setKnownExpenseColumns,
   SupabaseExpenseRow,
+  generateUUID,
+  ensureValidUUID,
 } from '../services/supabaseService';
 import { supabase, isSupabaseConfigured } from '../lib/supabase';
 
@@ -255,8 +257,9 @@ export function BudgetModule({
     const amount = parseFloat(newExpAmount);
     if (!newExpTitle.trim() || isNaN(amount) || amount <= 0) return;
 
+    const expenseId = generateUUID();
     const newExpense: HouseholdExpense = {
-      id: `exp-${Date.now()}`,
+      id: expenseId,
       title: newExpTitle.trim(),
       category: newExpCategory,
       isFixed: newExpIsFixed,
@@ -315,9 +318,10 @@ export function BudgetModule({
   };
 
   const handleDeleteExpense = async (id: string) => {
+    const validId = ensureValidUUID(id);
     onUpdateState((prev) => ({
       ...prev,
-      expenses: prev.expenses.filter((exp) => exp.id !== id),
+      expenses: prev.expenses.filter((exp) => exp.id !== id && exp.id !== validId),
     }));
     // Immediately execute database delete query in Supabase
     try {
@@ -325,7 +329,7 @@ export function BudgetModule({
         const { error: deleteError } = await supabase
           .from('expenses')
           .delete()
-          .eq('id', id);
+          .eq('id', validId);
         if (deleteError) {
           console.error("Expense Save Error:", deleteError);
           throw deleteError;
@@ -359,8 +363,10 @@ export function BudgetModule({
     const amount = parseFloat(editExpAmount);
     if (!editExpTitle.trim() || isNaN(amount) || amount <= 0) return;
 
+    const validId = ensureValidUUID(editingExpense.id);
     const updatedExpense: HouseholdExpense = {
       ...editingExpense,
+      id: validId,
       title: editExpTitle.trim(),
       category: editExpCategory,
       isFixed: editExpIsFixed,
@@ -378,7 +384,9 @@ export function BudgetModule({
 
     onUpdateState((prev) => ({
       ...prev,
-      expenses: prev.expenses.map((exp) => (exp.id === editingExpense.id ? updatedExpense : exp)),
+      expenses: prev.expenses.map((exp) =>
+        exp.id === editingExpense.id || exp.id === validId ? updatedExpense : exp
+      ),
     }));
 
     // Immediately persist updated expense directly to Supabase with exact schema mapping and error handling
