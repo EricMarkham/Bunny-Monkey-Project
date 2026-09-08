@@ -38,6 +38,7 @@ import {
   updateSinkingFundBalanceInSupabase,
   mapRowToTrip,
   mapRowToTripExpense,
+  mapRowToTripSettlement,
 } from '../services/supabaseService';
 import { supabase, isSupabaseConfigured } from '../lib/supabase';
 
@@ -105,20 +106,27 @@ export function TripSettlementModule({ state, onUpdateState }: TripSettlementMod
     if (!isSupabaseConfigured()) return;
     setIsSyncing(true);
     try {
-      const [tripsRes, expensesRes] = await Promise.all([
+      const [tripsRes, expensesRes, settlementsRes] = await Promise.all([
         supabase.from('trips').select('*'),
         supabase.from('trip_expenses').select('*'),
+        supabase.from('trip_settlements').select('*'),
       ]);
-      if (!tripsRes.error && tripsRes.data && tripsRes.data.length > 0) {
+      if (!tripsRes.error && tripsRes.data) {
         onUpdateState((prev) => ({
           ...prev,
           trips: tripsRes.data.map(mapRowToTrip),
         }));
       }
-      if (!expensesRes.error && expensesRes.data && expensesRes.data.length > 0) {
+      if (!expensesRes.error && expensesRes.data) {
         onUpdateState((prev) => ({
           ...prev,
           tripExpenses: expensesRes.data.map(mapRowToTripExpense),
+        }));
+      }
+      if (!settlementsRes.error && settlementsRes.data) {
+        onUpdateState((prev) => ({
+          ...prev,
+          tripSettlements: settlementsRes.data.map(mapRowToTripSettlement),
         }));
       }
       setSyncStatus('✓ Trips synced');

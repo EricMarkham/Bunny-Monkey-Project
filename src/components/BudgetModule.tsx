@@ -135,20 +135,30 @@ export function BudgetModule({
     if (!isSupabaseConfigured()) return;
     setIsSyncing(true);
     try {
-      const [expRes, sfRes] = await Promise.all([
+      const [expRes, sfRes, settingsRes] = await Promise.all([
         supabase.from('expenses').select('*'),
         supabase.from('sinking_funds').select('*'),
+        supabase.from('settings').select('value').eq('id', 'partners').maybeSingle(),
       ]);
-      if (!expRes.error && expRes.data && expRes.data.length > 0) {
+      if (!expRes.error && expRes.data) {
         onUpdateState((prev) => ({
           ...prev,
           expenses: expRes.data.map(mapRowToExpense),
         }));
       }
-      if (!sfRes.error && sfRes.data && sfRes.data.length > 0) {
+      if (!sfRes.error && sfRes.data) {
         onUpdateState((prev) => ({
           ...prev,
           sinkingFunds: sfRes.data.map(mapRowToSinkingFund),
+        }));
+      }
+      if (!settingsRes.error && settingsRes.data?.value) {
+        onUpdateState((prev) => ({
+          ...prev,
+          partners: {
+            bunny: { ...prev.partners.bunny, ...settingsRes.data.value.bunny },
+            monkey: { ...prev.partners.monkey, ...settingsRes.data.value.monkey },
+          },
         }));
       }
       setSyncStatus('✓ Synced with Supabase');

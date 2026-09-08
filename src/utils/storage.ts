@@ -48,7 +48,7 @@ export function sanitizeAndMigrateState(parsed: any): HouseholdState {
       ? parsed.tripSettlements
       : initialHouseholdState.tripSettlements,
     statementTransactions:
-      Array.isArray(parsed.statementTransactions) && parsed.statementTransactions.length > 0
+      Array.isArray(parsed.statementTransactions)
         ? sanitizeTransactions(parsed.statementTransactions)
         : sanitizeTransactions(initialHouseholdState.statementTransactions),
     holdings: Array.isArray(parsed.holdings) ? parsed.holdings : initialHouseholdState.holdings,

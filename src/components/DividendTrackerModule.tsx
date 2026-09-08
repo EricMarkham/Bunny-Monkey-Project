@@ -18,6 +18,7 @@ import {
   Loader2,
   AlertCircle,
   ExternalLink,
+  Edit2,
 } from 'lucide-react';
 import {
   AccountType,
@@ -39,6 +40,7 @@ import { supabase } from '../lib/supabase';
 import {
   mapHoldingToRow,
   mapRowToHolding,
+  updateDripSettingsInSupabase,
 } from '../services/supabaseService';
 
 interface DividendTrackerModuleProps {
@@ -140,6 +142,23 @@ export function DividendTrackerModule({ state, onUpdateState }: DividendTrackerM
   const [dgrRate, setDgrRate] = useState(state.dripSettings.expectedDgr);
   const [capRate, setCapRate] = useState(state.dripSettings.capitalGrowthRate);
   const [reinvest, setReinvest] = useState(state.dripSettings.reinvestDividends);
+
+  // Edit Holding modal state
+  const [editingHolding, setEditingHolding] = useState<DividendHolding | null>(null);
+  const [isUpdatingHolding, setIsUpdatingHolding] = useState(false);
+
+  // Helper to persist DRIP changes to Supabase
+  const handleUpdateDripSetting = (key: keyof HouseholdState['dripSettings'], value: any) => {
+    const updated = {
+      ...state.dripSettings,
+      [key]: value,
+    };
+    onUpdateState((prev) => ({
+      ...prev,
+      dripSettings: updated,
+    }));
+    updateDripSettingsInSupabase(updated);
+  };
 
   // New Holding form state
   const [newSymbol, setNewSymbol] = useState('');
@@ -395,6 +414,36 @@ export function DividendTrackerModule({ state, onUpdateState }: DividendTrackerM
       }
     } catch (err) {
       console.error('[Supabase] Exception updating DRIP:', err);
+    }
+  };
+
+  // Direct Supabase Update for Holding
+  const handleSaveEditedHolding = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingHolding || isUpdatingHolding) return;
+    setIsUpdatingHolding(true);
+
+    try {
+      const dbRow = mapHoldingToRow(editingHolding);
+      const { error } = await supabase
+        .from('holdings')
+        .update(dbRow)
+        .eq('id', editingHolding.id);
+
+      if (error) {
+        console.warn('[Supabase] Error updating holding:', error.message);
+      }
+
+      onUpdateState((prev) => ({
+        ...prev,
+        holdings: prev.holdings.map((h) => (h.id === editingHolding.id ? editingHolding : h)),
+      }));
+
+      setEditingHolding(null);
+    } catch (err) {
+      console.error('[Supabase] Exception updating holding:', err);
+    } finally {
+      setIsUpdatingHolding(false);
     }
   };
 
@@ -700,7 +749,11 @@ export function DividendTrackerModule({ state, onUpdateState }: DividendTrackerM
               min="1"
               max="30"
               value={horizonYears}
-              onChange={(e) => setHorizonYears(parseInt(e.target.value))}
+              onChange={(e) => {
+                const val = parseInt(e.target.value);
+                setHorizonYears(val);
+                handleUpdateDripSetting('investmentHorizonYears', val);
+              }}
               className="w-full accent-emerald-500"
             />
           </div>
@@ -719,7 +772,11 @@ export function DividendTrackerModule({ state, onUpdateState }: DividendTrackerM
               max="5000"
               step="100"
               value={monthlyContribution}
-              onChange={(e) => setMonthlyContribution(parseInt(e.target.value))}
+              onChange={(e) => {
+                const val = parseInt(e.target.value);
+                setMonthlyContribution(val);
+                handleUpdateDripSetting('monthlyContribution', val);
+              }}
               className="w-full accent-emerald-500"
             />
           </div>
@@ -738,7 +795,11 @@ export function DividendTrackerModule({ state, onUpdateState }: DividendTrackerM
               max="15"
               step="0.5"
               value={dgrRate}
-              onChange={(e) => setDgrRate(parseFloat(e.target.value))}
+              onChange={(e) => {
+                const val = parseFloat(e.target.value);
+                setDgrRate(val);
+                handleUpdateDripSetting('expectedDgr', val);
+              }}
               className="w-full accent-emerald-500"
             />
           </div>
@@ -757,7 +818,11 @@ export function DividendTrackerModule({ state, onUpdateState }: DividendTrackerM
               max="12"
               step="0.5"
               value={capRate}
-              onChange={(e) => setCapRate(parseFloat(e.target.value))}
+              onChange={(e) => {
+                const val = parseFloat(e.target.value);
+                setCapRate(val);
+                handleUpdateDripSetting('capitalGrowthRate', val);
+              }}
               className="w-full accent-emerald-500"
             />
           </div>
@@ -768,7 +833,11 @@ export function DividendTrackerModule({ state, onUpdateState }: DividendTrackerM
               Reinvest Dividends (DRIP)
             </span>
             <button
-              onClick={() => setReinvest(!reinvest)}
+              onClick={() => {
+                const next = !reinvest;
+                setReinvest(next);
+                handleUpdateDripSetting('reinvestDividends', next);
+              }}
               className={`py-1.5 2xl:py-2 px-3 rounded-xl font-bold text-xs 2xl:text-sm transition-all flex items-center justify-center space-x-1.5 border ${
                 reinvest
                   ? 'bg-emerald-600 hover:bg-emerald-500 border-emerald-400/50 text-white shadow-lg shadow-emerald-600/20'
@@ -971,13 +1040,22 @@ export function DividendTrackerModule({ state, onUpdateState }: DividendTrackerM
                       </button>
                     </td>
                     <td className="py-3 px-3 2xl:py-4 2xl:px-4 text-center">
-                      <button
-                        onClick={() => handleDeleteHolding(h.id)}
-                        className="p-1.5 text-slate-400 hover:text-rose-400 hover:bg-rose-500/20 rounded-lg transition-all"
-                        title="Delete holding"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </button>
+                      <div className="flex items-center justify-center gap-1">
+                        <button
+                          onClick={() => setEditingHolding(h)}
+                          className="p-1.5 text-slate-400 hover:text-indigo-300 hover:bg-indigo-500/20 rounded-lg transition-all"
+                          title="Edit holding"
+                        >
+                          <Edit2 className="w-4 h-4" />
+                        </button>
+                        <button
+                          onClick={() => handleDeleteHolding(h.id)}
+                          className="p-1.5 text-slate-400 hover:text-rose-400 hover:bg-rose-500/20 rounded-lg transition-all"
+                          title="Delete holding"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 );
@@ -1387,6 +1465,152 @@ export function DividendTrackerModule({ state, onUpdateState }: DividendTrackerM
                     <>
                       <CheckCircle2 className="w-4 h-4" />
                       <span>Save Position</span>
+                    </>
+                  )}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* --- EDIT HOLDING MODAL (Direct Supabase Update) --- */}
+      {editingHolding && (
+        <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-md flex items-center justify-center p-4 overflow-y-auto">
+          <div className="bg-slate-900/95 backdrop-blur-xl rounded-2xl max-w-xl 2xl:max-w-2xl w-full p-6 2xl:p-8 border border-white/15 shadow-2xl shadow-black/60 text-slate-100 my-8">
+            <div className="flex items-center justify-between pb-3 border-b border-white/10 mb-4">
+              <div>
+                <h3 className="text-base 2xl:text-xl font-bold text-white flex items-center gap-2">
+                  <span className="p-1.5 rounded-lg bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">
+                    <Edit2 className="w-4 h-4 2xl:w-5 2xl:h-5" />
+                  </span>
+                  Edit Position: {editingHolding.symbol}
+                </h3>
+                <p className="text-xs 2xl:text-sm text-slate-400 mt-0.5">
+                  Update shares, cost basis, price, or dividend distribution directly in Supabase
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setEditingHolding(null)}
+                className="text-slate-400 hover:text-white p-1 rounded-lg hover:bg-white/10 transition-all text-sm font-bold"
+              >
+                ✕
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveEditedHolding} className="space-y-4 text-xs 2xl:text-sm">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-slate-300 font-medium mb-1">Company / ETF Name</label>
+                  <input
+                    type="text"
+                    required
+                    value={editingHolding.name}
+                    onChange={(e) => setEditingHolding({ ...editingHolding, name: e.target.value })}
+                    className="w-full px-3 py-2 rounded-xl border border-white/15 bg-slate-950/80 text-white placeholder-slate-500 focus:outline-hidden"
+                  />
+                </div>
+                <div>
+                  <label className="block text-slate-300 font-medium mb-1">Account</label>
+                  <select
+                    value={editingHolding.account}
+                    onChange={(e) => setEditingHolding({ ...editingHolding, account: e.target.value as AccountType })}
+                    className="w-full px-3 py-2 rounded-xl border border-white/15 bg-slate-950/80 text-white focus:outline-hidden"
+                  >
+                    <option value="TFSA">TFSA (Tax-Free)</option>
+                    <option value="RRSP">RRSP (Tax-Deferred)</option>
+                    <option value="Non-Registered">Non-Registered (Taxable)</option>
+                    <option value="RESP">RESP (Education)</option>
+                  </select>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <div>
+                  <label className="block text-slate-300 font-medium mb-1">Shares Count</label>
+                  <input
+                    type="number"
+                    step="any"
+                    required
+                    value={editingHolding.shares}
+                    onChange={(e) => setEditingHolding({ ...editingHolding, shares: parseFloat(e.target.value) || 0 })}
+                    className="w-full px-3 py-2 rounded-xl border border-white/15 bg-slate-950/80 text-white font-mono focus:outline-hidden"
+                  />
+                </div>
+                <div>
+                  <label className="block text-slate-300 font-medium mb-1">Avg Cost Basis</label>
+                  <input
+                    type="number"
+                    step="any"
+                    required
+                    value={editingHolding.averageCostBasis}
+                    onChange={(e) => setEditingHolding({ ...editingHolding, averageCostBasis: parseFloat(e.target.value) || 0 })}
+                    className="w-full px-3 py-2 rounded-xl border border-white/15 bg-slate-950/80 text-white font-mono focus:outline-hidden"
+                  />
+                </div>
+                <div>
+                  <label className="block text-slate-300 font-medium mb-1">Current Price</label>
+                  <input
+                    type="number"
+                    step="any"
+                    required
+                    value={editingHolding.currentPrice}
+                    onChange={(e) => setEditingHolding({ ...editingHolding, currentPrice: parseFloat(e.target.value) || 0 })}
+                    className="w-full px-3 py-2 rounded-xl border border-white/15 bg-slate-950/80 text-white font-mono focus:outline-hidden"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-slate-300 font-medium mb-1">Annual Dividend / Share</label>
+                  <input
+                    type="number"
+                    step="any"
+                    required
+                    value={editingHolding.annualDividendPerShare}
+                    onChange={(e) => setEditingHolding({ ...editingHolding, annualDividendPerShare: parseFloat(e.target.value) || 0 })}
+                    className="w-full px-3 py-2 rounded-xl border border-white/15 bg-slate-950/80 text-white font-mono focus:outline-hidden"
+                  />
+                </div>
+                <div>
+                  <label className="block text-slate-300 font-medium mb-1">Payout Frequency</label>
+                  <select
+                    value={editingHolding.payoutFrequency}
+                    onChange={(e) => setEditingHolding({ ...editingHolding, payoutFrequency: e.target.value as PayoutFrequency })}
+                    className="w-full px-3 py-2 rounded-xl border border-white/15 bg-slate-950/80 text-white focus:outline-hidden"
+                  >
+                    <option value="Monthly">Monthly (12x/yr)</option>
+                    <option value="Quarterly">Quarterly (4x/yr)</option>
+                    <option value="Semi-Annual">Semi-Annual (2x/yr)</option>
+                    <option value="Annual">Annual (1x/yr)</option>
+                  </select>
+                </div>
+              </div>
+
+              <div className="flex justify-end space-x-2 pt-3 border-t border-white/10">
+                <button
+                  type="button"
+                  onClick={() => setEditingHolding(null)}
+                  className="px-4 py-2 rounded-xl text-slate-400 hover:text-white border border-white/10 bg-white/5 hover:bg-white/10 transition-all font-medium"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={isUpdatingHolding}
+                  className="px-5 py-2 rounded-xl bg-indigo-600 text-white hover:bg-indigo-500 disabled:opacity-60 font-semibold border border-indigo-400/50 shadow-lg shadow-indigo-600/20 transition-all flex items-center gap-1.5"
+                >
+                  {isUpdatingHolding ? (
+                    <>
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                      <span>Updating Supabase...</span>
+                    </>
+                  ) : (
+                    <>
+                      <CheckCircle2 className="w-4 h-4" />
+                      <span>Save Changes</span>
                     </>
                   )}
                 </button>
