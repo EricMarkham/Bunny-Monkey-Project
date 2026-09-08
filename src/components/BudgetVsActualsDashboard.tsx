@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import {
   BarChart3,
   Calendar,
@@ -24,6 +24,7 @@ import {
   Shield,
   Plane,
   Sparkles,
+  RefreshCw,
 } from 'lucide-react';
 import {
   ResponsiveContainer,
@@ -42,12 +43,19 @@ import {
   formatCurrency,
   formatCurrencyExact,
   getStatementPeriods,
+  sanitizeTransactions,
 } from '../utils/finance';
+import {
+  mapRowToExpense,
+  mapRowToTransaction,
+} from '../services/supabaseService';
+import { supabase, isSupabaseConfigured } from '../lib/supabase';
 
 interface BudgetVsActualsDashboardProps {
   state: HouseholdState;
   onNavigateToStatements: () => void;
   onNavigateToBudget: () => void;
+  onUpdateState?: React.Dispatch<React.SetStateAction<HouseholdState>>;
 }
 
 const CATEGORY_ICONS: Record<string, React.ReactNode> = {
@@ -69,7 +77,60 @@ export function BudgetVsActualsDashboard({
   state,
   onNavigateToStatements,
   onNavigateToBudget,
+  onUpdateState,
 }: BudgetVsActualsDashboardProps) {
+  const [isSyncing, setIsSyncing] = useState(false);
+  const [syncStatus, setSyncStatus] = useState<string | null>(null);
+  const [syncError, setSyncError] = useState<string | null>(null);
+
+  const syncFromSupabase = async () => {
+    if (!isSupabaseConfigured() || !onUpdateState) return;
+    setIsSyncing(true);
+    setSyncError(null);
+    try {
+      const [expRes, txRes, stTxRes] = await Promise.all([
+        supabase.from('expenses').select('*'),
+        supabase.from('transactions').select('*').order('date', { ascending: false }),
+        supabase.from('statement_transactions').select('*').order('date', { ascending: false }),
+      ]);
+
+      if (expRes.error) {
+        console.error('[Supabase BudgetVsActuals Error]: Failed to fetch expenses:', expRes.error);
+      }
+      if (txRes.error && stTxRes.error) {
+        console.error('[Supabase BudgetVsActuals Error]: Failed to fetch transactions:', txRes.error || stTxRes.error);
+      }
+
+      const freshExpenses = !expRes.error && expRes.data ? expRes.data.map(mapRowToExpense) : null;
+      const txData =
+        !txRes.error && txRes.data && txRes.data.length > 0
+          ? txRes.data
+          : !stTxRes.error && stTxRes.data
+          ? stTxRes.data
+          : null;
+      const freshTransactions = txData ? sanitizeTransactions(txData.map(mapRowToTransaction)) : null;
+
+      if (freshExpenses || freshTransactions) {
+        onUpdateState((prev) => ({
+          ...prev,
+          ...(freshExpenses ? { expenses: freshExpenses } : {}),
+          ...(freshTransactions ? { statementTransactions: freshTransactions } : {}),
+        }));
+        setSyncStatus('✓ Synced from Supabase');
+        setTimeout(() => setSyncStatus(null), 3000);
+      }
+    } catch (err: any) {
+      console.error('[Supabase BudgetVsActuals Exception]:', err);
+      setSyncError(err?.message || 'Failed to sync latest records from Supabase');
+    } finally {
+      setIsSyncing(false);
+    }
+  };
+
+  useEffect(() => {
+    syncFromSupabase();
+  }, []);
+
   const availablePeriods = useMemo(
     () => getStatementPeriods(state.statementTransactions),
     [state.statementTransactions]
@@ -122,6 +183,25 @@ export function BudgetVsActualsDashboard({
 
   return (
     <div className="space-y-8 pb-16">
+      {/* Supabase Error Alert Notification */}
+      {syncError && (
+        <div className="bg-rose-500/15 border border-rose-500/30 text-rose-300 px-4 py-3 rounded-2xl flex items-center justify-between gap-3 text-xs sm:text-sm shadow-lg shadow-rose-950/20">
+          <div className="flex items-center gap-2.5">
+            <AlertCircle className="w-5 h-5 text-rose-400 shrink-0" />
+            <div>
+              <p className="font-semibold text-rose-200">Supabase Database Error</p>
+              <p className="text-rose-300/90 text-xs">{syncError}</p>
+            </div>
+          </div>
+          <button
+            onClick={() => setSyncError(null)}
+            className="text-xs px-3 py-1.5 rounded-lg bg-rose-500/20 hover:bg-rose-500/30 text-rose-200 font-medium transition-colors shrink-0"
+          >
+            Dismiss
+          </button>
+        </div>
+      )}
+
       {/* 1. Header & Period Selector */}
       <div className="bg-white/5 backdrop-blur-lg rounded-2xl p-6 2xl:p-8 border border-white/15 shadow-xl shadow-black/10">
         <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-6">
@@ -186,6 +266,17 @@ export function BudgetVsActualsDashboard({
                 Year to Date (YTD)
               </button>
             </div>
+
+            {/* Dynamic Supabase Sync Button */}
+            <button
+              onClick={syncFromSupabase}
+              disabled={isSyncing}
+              className="flex items-center space-x-1.5 px-3 2xl:px-4 py-1.5 2xl:py-2 text-xs 2xl:text-sm font-semibold rounded-xl bg-indigo-500/20 text-indigo-200 border border-indigo-500/30 hover:bg-indigo-500/30 transition-all disabled:opacity-50 cursor-pointer shadow-xs"
+              title="Fetch latest expenses and statement transactions dynamically from Supabase"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 2xl:w-4 2xl:h-4 text-indigo-300 ${isSyncing ? 'animate-spin' : ''}`} />
+              <span>{isSyncing ? 'Syncing...' : syncStatus || 'Sync Supabase'}</span>
+            </button>
           </div>
         </div>
 

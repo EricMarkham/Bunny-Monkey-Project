@@ -41,6 +41,8 @@ import {
   mapHoldingToRow,
   mapRowToHolding,
   updateDripSettingsInSupabase,
+  insertOrUpdateHoldingInSupabase,
+  deleteHoldingFromSupabase,
 } from '../services/supabaseService';
 
 interface DividendTrackerModuleProps {
@@ -387,10 +389,13 @@ export function DividendTrackerModule({ state, onUpdateState }: DividendTrackerM
     try {
       const { error } = await supabase.from('holdings').delete().eq('id', id);
       if (error) {
-        console.warn('[Supabase] Error deleting holding from Supabase:', error.message);
+        console.error('[Supabase Holding Delete Error]:', error.message || error, { id });
+        throw error;
       }
-    } catch (err) {
-      console.error('[Supabase] Exception deleting holding:', err);
+      await deleteHoldingFromSupabase(id);
+    } catch (err: any) {
+      console.error('[Supabase Holding Delete Exception]:', err?.message || err, { id });
+      setHoldingsError(`Failed to delete holding from Supabase: ${err?.message || String(err)}`);
     }
   };
 
@@ -398,10 +403,11 @@ export function DividendTrackerModule({ state, onUpdateState }: DividendTrackerM
     const target = state.holdings.find((h) => h.id === id);
     if (!target) return;
     const nextDrip = !target.dripEnabled;
+    const updatedHolding = { ...target, dripEnabled: nextDrip };
 
     onUpdateState((prev) => ({
       ...prev,
-      holdings: prev.holdings.map((h) => (h.id === id ? { ...h, dripEnabled: nextDrip } : h)),
+      holdings: prev.holdings.map((h) => (h.id === id ? updatedHolding : h)),
     }));
 
     try {
@@ -410,10 +416,11 @@ export function DividendTrackerModule({ state, onUpdateState }: DividendTrackerM
         .update({ drip_enabled: nextDrip, updated_at: new Date().toISOString() })
         .eq('id', id);
       if (error) {
-        console.warn('[Supabase] Error updating DRIP in Supabase:', error.message);
+        console.error('[Supabase DRIP Update Error]:', error.message || error, { id, nextDrip });
+        await insertOrUpdateHoldingInSupabase(updatedHolding);
       }
     } catch (err) {
-      console.error('[Supabase] Exception updating DRIP:', err);
+      console.error('[Supabase DRIP Update Exception]:', err);
     }
   };
 
@@ -431,7 +438,12 @@ export function DividendTrackerModule({ state, onUpdateState }: DividendTrackerM
         .eq('id', editingHolding.id);
 
       if (error) {
-        console.warn('[Supabase] Error updating holding:', error.message);
+        console.error('[Supabase Holding Update Error]:', error.message || error, { payload: dbRow });
+        const { error: upsertErr } = await supabase.from('holdings').upsert(dbRow, { onConflict: 'id' });
+        if (upsertErr) {
+          console.error('[Supabase Holding Upsert Fallback Error]:', upsertErr.message || upsertErr);
+          throw upsertErr;
+        }
       }
 
       onUpdateState((prev) => ({
@@ -440,8 +452,9 @@ export function DividendTrackerModule({ state, onUpdateState }: DividendTrackerM
       }));
 
       setEditingHolding(null);
-    } catch (err) {
+    } catch (err: any) {
       console.error('[Supabase] Exception updating holding:', err);
+      setHoldingsError(`Failed to update holding in Supabase: ${err?.message || String(err)}`);
     } finally {
       setIsUpdatingHolding(false);
     }

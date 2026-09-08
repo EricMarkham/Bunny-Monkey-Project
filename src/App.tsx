@@ -162,6 +162,7 @@ export default function App() {
         {activeTab === 'actuals' && (
           <BudgetVsActualsDashboard
             state={state}
+            onUpdateState={setState}
             onNavigateToStatements={() => setActiveTab('statement')}
             onNavigateToBudget={() => setActiveTab('budget')}
           />

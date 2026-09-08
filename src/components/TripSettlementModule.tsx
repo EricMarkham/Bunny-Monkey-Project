@@ -39,6 +39,8 @@ import {
   mapRowToTrip,
   mapRowToTripExpense,
   mapRowToTripSettlement,
+  mapTripToRow,
+  mapTripExpenseToRow,
 } from '../services/supabaseService';
 import { supabase, isSupabaseConfigured } from '../lib/supabase';
 
@@ -101,16 +103,29 @@ export function TripSettlementModule({ state, onUpdateState }: TripSettlementMod
   // Cloud sync state for TripSettlementModule
   const [isSyncing, setIsSyncing] = useState(false);
   const [syncStatus, setSyncStatus] = useState<string | null>(null);
+  const [dbError, setDbError] = useState<string | null>(null);
 
   const syncTripsFromSupabase = async () => {
     if (!isSupabaseConfigured()) return;
     setIsSyncing(true);
+    setDbError(null);
     try {
       const [tripsRes, expensesRes, settlementsRes] = await Promise.all([
         supabase.from('trips').select('*'),
         supabase.from('trip_expenses').select('*'),
         supabase.from('trip_settlements').select('*'),
       ]);
+
+      if (tripsRes.error) {
+        console.error('[Supabase Trips Select Error]:', tripsRes.error);
+      }
+      if (expensesRes.error) {
+        console.error('[Supabase Trip Expenses Select Error]:', expensesRes.error);
+      }
+      if (settlementsRes.error) {
+        console.error('[Supabase Trip Settlements Select Error]:', settlementsRes.error);
+      }
+
       if (!tripsRes.error && tripsRes.data) {
         onUpdateState((prev) => ({
           ...prev,
@@ -131,8 +146,9 @@ export function TripSettlementModule({ state, onUpdateState }: TripSettlementMod
       }
       setSyncStatus('✓ Trips synced');
       setTimeout(() => setSyncStatus(null), 3000);
-    } catch (err) {
-      console.warn('Sync error:', err);
+    } catch (err: any) {
+      console.error('[Supabase Trips Sync Exception]:', err);
+      setDbError(err?.message || 'Failed to synchronize trips with Supabase');
     } finally {
       setIsSyncing(false);
     }
@@ -159,10 +175,21 @@ export function TripSettlementModule({ state, onUpdateState }: TripSettlementMod
         activeTripId: nextActiveId,
       };
     });
-    // Immediately delete trip from Supabase
-    await deleteTripFromSupabase(tripId);
-    setSyncStatus('✓ Trip deleted from Supabase');
-    setTimeout(() => setSyncStatus(null), 3000);
+    try {
+      if (isSupabaseConfigured()) {
+        const { error } = await supabase.from('trips').delete().eq('id', tripId);
+        if (error) {
+          console.error('[Supabase Trip Delete Error]:', error.message || error, { tripId });
+        }
+        await supabase.from('trip_expenses').delete().eq('trip_id', tripId);
+      }
+      await deleteTripFromSupabase(tripId);
+      setSyncStatus('✓ Trip deleted from Supabase');
+      setTimeout(() => setSyncStatus(null), 3000);
+    } catch (err: any) {
+      console.error('[Supabase Trip Delete Exception]:', err);
+      setDbError(err?.message || 'Failed to delete trip from Supabase');
+    }
     setTripToDelete(null);
   };
 
@@ -240,9 +267,22 @@ export function TripSettlementModule({ state, onUpdateState }: TripSettlementMod
     }));
 
     // Immediately execute database insert query in Supabase
-    await insertOrUpdateTripInSupabase(newTrip);
-    setSyncStatus('✓ Trip created in Supabase');
-    setTimeout(() => setSyncStatus(null), 3000);
+    try {
+      if (isSupabaseConfigured()) {
+        const row = mapTripToRow(newTrip);
+        const { error } = await supabase.from('trips').upsert(row, { onConflict: 'id' });
+        if (error) {
+          console.error('[Supabase Trip Upsert Error]:', error.message || error, { row });
+          throw error;
+        }
+      }
+      await insertOrUpdateTripInSupabase(newTrip);
+      setSyncStatus('✓ Trip created in Supabase');
+      setTimeout(() => setSyncStatus(null), 3000);
+    } catch (err: any) {
+      console.error('[Supabase Trip Create Exception]:', err);
+      setDbError(err?.message || 'Failed to create trip in Supabase');
+    }
 
     setTripName('');
     setTripDest('');
@@ -256,6 +296,25 @@ export function TripSettlementModule({ state, onUpdateState }: TripSettlementMod
   if (!activeTrip || state.trips.length === 0) {
     return (
       <div className="space-y-6">
+        {/* Supabase Error Alert Notification */}
+        {dbError && (
+          <div className="bg-rose-500/15 border border-rose-500/30 text-rose-300 px-4 py-3 rounded-2xl flex items-center justify-between gap-3 text-xs sm:text-sm shadow-lg shadow-rose-950/20">
+            <div className="flex items-center gap-2.5">
+              <AlertTriangle className="w-5 h-5 text-rose-400 shrink-0" />
+              <div>
+                <p className="font-semibold text-rose-200">Supabase Database Error</p>
+                <p className="text-rose-300/90 text-xs">{dbError}</p>
+              </div>
+            </div>
+            <button
+              onClick={() => setDbError(null)}
+              className="text-xs px-3 py-1.5 rounded-lg bg-rose-500/20 hover:bg-rose-500/30 text-rose-200 font-medium transition-colors shrink-0"
+            >
+              Dismiss
+            </button>
+          </div>
+        )}
+
         {/* Header */}
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-4 border-b border-white/10">
           <div className="flex items-center space-x-3">
@@ -481,15 +540,28 @@ export function TripSettlementModule({ state, onUpdateState }: TripSettlementMod
     });
 
     // Immediately persist trip expense to Supabase
-    await insertOrUpdateTripExpenseInSupabase(newExpense);
-    if (expPaidBy === 'sinking_fund' && vacationFund) {
-      await updateSinkingFundBalanceInSupabase(
-        vacationFund.id,
-        Math.max(0, vacationFund.currentBalance - cost)
-      );
+    try {
+      if (isSupabaseConfigured()) {
+        const row = mapTripExpenseToRow(newExpense);
+        const { error } = await supabase.from('trip_expenses').upsert(row, { onConflict: 'id' });
+        if (error) {
+          console.error('[Supabase Trip Expense Upsert Error]:', error.message || error, { row });
+          throw error;
+        }
+      }
+      await insertOrUpdateTripExpenseInSupabase(newExpense);
+      if (expPaidBy === 'sinking_fund' && vacationFund) {
+        await updateSinkingFundBalanceInSupabase(
+          vacationFund.id,
+          Math.max(0, vacationFund.currentBalance - cost)
+        );
+      }
+      setSyncStatus('✓ Trip expense saved to Supabase');
+      setTimeout(() => setSyncStatus(null), 3000);
+    } catch (err: any) {
+      console.error('[Supabase Trip Expense Add Exception]:', err);
+      setDbError(err?.message || 'Failed to save trip expense in Supabase');
     }
-    setSyncStatus('✓ Trip expense saved to Supabase');
-    setTimeout(() => setSyncStatus(null), 3000);
 
     setExpDesc('');
     setExpCost('');
@@ -537,15 +609,27 @@ export function TripSettlementModule({ state, onUpdateState }: TripSettlementMod
     });
 
     // Immediately persist update to Supabase
-    await insertOrUpdateTripExpenseInSupabase(updatedExpense);
-    if (vacationFund) {
-      const newBal = willBeFunded
-        ? Math.max(0, vacationFund.currentBalance - exp.totalCost)
-        : vacationFund.currentBalance + exp.totalCost;
-      await updateSinkingFundBalanceInSupabase(vacationFund.id, newBal);
+    try {
+      if (isSupabaseConfigured()) {
+        const row = mapTripExpenseToRow(updatedExpense);
+        const { error } = await supabase.from('trip_expenses').upsert(row, { onConflict: 'id' });
+        if (error) {
+          console.error('[Supabase Trip Expense Upsert Error]:', error.message || error, { row });
+        }
+      }
+      await insertOrUpdateTripExpenseInSupabase(updatedExpense);
+      if (vacationFund) {
+        const newBal = willBeFunded
+          ? Math.max(0, vacationFund.currentBalance - exp.totalCost)
+          : vacationFund.currentBalance + exp.totalCost;
+        await updateSinkingFundBalanceInSupabase(vacationFund.id, newBal);
+      }
+      setSyncStatus('✓ Trip expense updated in Supabase');
+      setTimeout(() => setSyncStatus(null), 3000);
+    } catch (err: any) {
+      console.error('[Supabase Trip Expense Toggle Exception]:', err);
+      setDbError(err?.message || 'Failed to update trip expense in Supabase');
     }
-    setSyncStatus('✓ Trip expense updated in Supabase');
-    setTimeout(() => setSyncStatus(null), 3000);
   };
 
   const handleDeleteExpense = async (id: string) => {
@@ -554,9 +638,20 @@ export function TripSettlementModule({ state, onUpdateState }: TripSettlementMod
       tripExpenses: prev.tripExpenses.filter((e) => e.id !== id),
     }));
     // Immediately delete expense from Supabase
-    await deleteTripExpenseFromSupabase(id);
-    setSyncStatus('✓ Trip expense deleted from Supabase');
-    setTimeout(() => setSyncStatus(null), 3000);
+    try {
+      if (isSupabaseConfigured()) {
+        const { error } = await supabase.from('trip_expenses').delete().eq('id', id);
+        if (error) {
+          console.error('[Supabase Trip Expense Delete Error]:', error.message || error, { id });
+        }
+      }
+      await deleteTripExpenseFromSupabase(id);
+      setSyncStatus('✓ Trip expense deleted from Supabase');
+      setTimeout(() => setSyncStatus(null), 3000);
+    } catch (err: any) {
+      console.error('[Supabase Trip Expense Delete Exception]:', err);
+      setDbError(err?.message || 'Failed to delete trip expense from Supabase');
+    }
   };
 
   // Process Reimbursement from Sinking Fund for selected expenses
@@ -600,19 +695,29 @@ export function TripSettlementModule({ state, onUpdateState }: TripSettlementMod
     });
 
     // Immediately persist reimbursed expenses and updated fund balance to Supabase
-    for (const e of selectedExpenses) {
-      await insertOrUpdateTripExpenseInSupabase({
-        ...e,
-        fundedBySinkingFund: true,
-        sinkingFundId: vacationFund.id,
-      });
+    try {
+      for (const e of selectedExpenses) {
+        const updatedExp: TripExpense = {
+          ...e,
+          fundedBySinkingFund: true,
+          sinkingFundId: vacationFund.id,
+        };
+        if (isSupabaseConfigured()) {
+          const row = mapTripExpenseToRow(updatedExp);
+          await supabase.from('trip_expenses').upsert(row, { onConflict: 'id' });
+        }
+        await insertOrUpdateTripExpenseInSupabase(updatedExp);
+      }
+      await updateSinkingFundBalanceInSupabase(
+        vacationFund.id,
+        Math.max(0, vacationFund.currentBalance - totalToReimburse)
+      );
+      setSyncStatus('✓ Sinking fund reimbursement saved to Supabase');
+      setTimeout(() => setSyncStatus(null), 3000);
+    } catch (err: any) {
+      console.error('[Supabase Reimbursement Exception]:', err);
+      setDbError(err?.message || 'Failed to save reimbursement to Supabase');
     }
-    await updateSinkingFundBalanceInSupabase(
-      vacationFund.id,
-      Math.max(0, vacationFund.currentBalance - totalToReimburse)
-    );
-    setSyncStatus('✓ Sinking fund reimbursement saved to Supabase');
-    setTimeout(() => setSyncStatus(null), 3000);
 
     confetti({
       particleCount: 100,
@@ -626,6 +731,25 @@ export function TripSettlementModule({ state, onUpdateState }: TripSettlementMod
 
   return (
     <div className="space-y-6 2xl:space-y-8">
+      {/* Supabase Error Alert Notification */}
+      {dbError && (
+        <div className="bg-rose-500/15 border border-rose-500/30 text-rose-300 px-4 py-3 rounded-2xl flex items-center justify-between gap-3 text-xs sm:text-sm shadow-lg shadow-rose-950/20">
+          <div className="flex items-center gap-2.5">
+            <AlertTriangle className="w-5 h-5 text-rose-400 shrink-0" />
+            <div>
+              <p className="font-semibold text-rose-200">Supabase Database Error</p>
+              <p className="text-rose-300/90 text-xs">{dbError}</p>
+            </div>
+          </div>
+          <button
+            onClick={() => setDbError(null)}
+            className="text-xs px-3 py-1.5 rounded-lg bg-rose-500/20 hover:bg-rose-500/30 text-rose-200 font-medium transition-colors shrink-0"
+          >
+            Dismiss
+          </button>
+        </div>
+      )}
+
       {/* Top Banner & Trip Selector */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-white/5 border border-white/10 p-5 2xl:p-6 rounded-2xl backdrop-blur-md">
         <div className="space-y-1">
