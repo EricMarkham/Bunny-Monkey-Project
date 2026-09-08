@@ -284,9 +284,9 @@ export function BudgetModule({
         setTimeout(() => setSyncStatus(null), 3000);
         setDbError(null);
       }
-    } catch (err: any) {
-      console.error('[Supabase Expenses Insert Exception]:', err?.message || err, { expense: newExpense, err });
-      setDbError(`Failed to save expense to Supabase: ${err?.message || String(err)}`);
+    } catch (error: any) {
+      console.error("Expense Save Error:", error);
+      setDbError(`Failed to save expense to Supabase: ${error?.message || String(error)}`);
     }
 
     // Reset
@@ -311,9 +311,9 @@ export function BudgetModule({
         setTimeout(() => setSyncStatus(null), 3000);
         setDbError(null);
       }
-    } catch (err: any) {
-      console.error('[Supabase Expenses Delete Exception]:', err?.message || err, { id, err });
-      setDbError(`Failed to delete expense from Supabase: ${err?.message || String(err)}`);
+    } catch (error: any) {
+      console.error("Expense Save Error:", error);
+      setDbError(`Failed to delete expense from Supabase: ${error?.message || String(error)}`);
     }
   };
 
@@ -366,9 +366,9 @@ export function BudgetModule({
         setTimeout(() => setSyncStatus(null), 3000);
         setDbError(null);
       }
-    } catch (err: any) {
-      console.error('[Supabase Expenses Update Exception]:', err?.message || err, { expense: updatedExpense, err });
-      setDbError(`Failed to update expense in Supabase: ${err?.message || String(err)}`);
+    } catch (error: any) {
+      console.error("Expense Save Error:", error);
+      setDbError(`Failed to update expense in Supabase: ${error?.message || String(error)}`);
     }
 
     setEditingExpense(null);

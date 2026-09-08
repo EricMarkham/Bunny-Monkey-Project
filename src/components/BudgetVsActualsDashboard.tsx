@@ -344,15 +344,15 @@ export function BudgetVsActualsDashboard({
           const rows = updatedExpenses.map((exp) => mapExpenseToRow(exp, state.partners));
           const { error } = await supabase.from('expenses').upsert(rows, { onConflict: 'id' });
           if (error) {
-            console.error('[Supabase Expenses Upsert Error in BudgetVsActuals]:', error.message || error);
+            console.error("Expense Save Error:", error);
             for (const exp of updatedExpenses) {
               await insertOrUpdateExpenseInSupabase(exp, state.partners).catch((e) => {
-                console.error('[Supabase Item Upsert Error in BudgetVsActuals]:', e);
+                console.error("Expense Save Error:", e);
               });
             }
           }
         } catch (dbErr) {
-          console.error('[BudgetVsActuals] Supabase DB Update Error:', dbErr);
+          console.error("Expense Save Error:", dbErr);
         }
       }
 

@@ -137,15 +137,22 @@ export function mapTransactionToRow(
 }
 
 /**
- * Known columns in Supabase 'expenses' table to ensure exact schema matching
+ * Exact schema for Supabase 'expenses' table to ensure zero schema mismatch errors.
+ * Required columns: id, item, category, type, split_logic, monthly_cost, bunny_share, monkey_share
  */
-let knownExpenseColumns: Set<string> | null = null;
+export interface SupabaseExpenseRow {
+  id: string;
+  item: string;
+  category: string;
+  type: string;
+  split_logic: string;
+  monthly_cost: number;
+  bunny_share: number;
+  monkey_share: number;
+}
 
-export function setKnownExpenseColumns(columns: string[]) {
-  if (Array.isArray(columns) && columns.length > 0) {
-    knownExpenseColumns = new Set(columns.map((c) => String(c).toLowerCase().trim()));
-    console.info('[Supabase] Registered expenses table schema columns:', Array.from(knownExpenseColumns));
-  }
+export function setKnownExpenseColumns(_columns: string[]) {
+  // Retained for backward-compatible interface signature
 }
 
 /**
@@ -218,19 +225,20 @@ export function mapRowToExpense(row: any): HouseholdExpense {
 }
 
 /**
- * Maps HouseholdExpense to a Supabase row payload matching table columns exactly.
- * Matches: item or name, category, type, split_logic or split, monthly_cost or amount, bunny_share, monkey_share.
- * Explicitly excludes custom_bunny_percent and custom_monkey_percent to prevent schema mismatch errors.
+ * Maps HouseholdExpense to a Supabase row payload matching table columns exactly:
+ * id, item, category, type, split_logic, monthly_cost, bunny_share, monkey_share.
+ * Excludes any non-table fields (custom_bunny_percent, notes, etc.) to prevent schema mismatch errors.
  */
 export function mapExpenseToRow(
   exp: any,
   partners?: { bunny: Partner; monkey: Partner }
-): Record<string, any> {
+): SupabaseExpenseRow {
+  const id = String(exp.id || `exp-${Date.now()}`).trim();
   const title = String(exp.item || exp.name || exp.title || '').trim();
-  const category = exp.category || 'Housing';
+  const category = String(exp.category || 'Housing');
   const type =
-    typeof exp.type === 'string'
-      ? exp.type
+    typeof exp.type === 'string' && exp.type.trim().length > 0
+      ? (exp.type.toLowerCase().includes('var') ? 'Variable' : 'Fixed')
       : Boolean(exp.is_fixed ?? exp.isFixed ?? true)
       ? 'Fixed'
       : 'Variable';
@@ -250,9 +258,9 @@ export function mapExpenseToRow(
     splitLogic = 'Proportional';
   }
 
-  const monthlyCost = Number(
-    exp.monthly_cost ?? exp.amount ?? exp.monthly_amount ?? exp.monthlyAmount ?? 0
-  );
+  const monthlyCost = Math.round(
+    (Number(exp.monthly_cost ?? exp.amount ?? exp.monthly_amount ?? exp.monthlyAmount ?? 0) || 0) * 100
+  ) / 100;
 
   // Compute bunny_share and monkey_share based on partner income split
   const bunnyRatio = partners
@@ -291,71 +299,10 @@ export function mapExpenseToRow(
   const bunny_share = Math.round(bShare * 100) / 100;
   const monkey_share = Math.round(mShare * 100) / 100;
 
-  // If table columns have already been detected, build an exact-match row
-  if (knownExpenseColumns && knownExpenseColumns.size > 0) {
-    const row: Record<string, any> = { id: String(exp.id) };
-
-    // item vs name vs title
-    if (knownExpenseColumns.has('item')) {
-      row.item = title;
-    } else if (knownExpenseColumns.has('name')) {
-      row.name = title;
-    } else if (knownExpenseColumns.has('title')) {
-      row.title = title;
-    } else {
-      row.item = title;
-    }
-
-    if (knownExpenseColumns.has('category')) {
-      row.category = category;
-    }
-
-    // type vs is_fixed
-    if (knownExpenseColumns.has('type')) {
-      row.type = type;
-    } else if (knownExpenseColumns.has('is_fixed')) {
-      row.is_fixed = type === 'Fixed';
-    }
-
-    // split_logic vs split vs split_method
-    if (knownExpenseColumns.has('split_logic')) {
-      row.split_logic = splitLogic;
-    } else if (knownExpenseColumns.has('split')) {
-      row.split = splitLogic;
-    } else if (knownExpenseColumns.has('split_method')) {
-      row.split_method = splitLogic.toLowerCase();
-    } else {
-      row.split_logic = splitLogic;
-    }
-
-    // monthly_cost vs amount vs monthly_amount
-    if (knownExpenseColumns.has('monthly_cost')) {
-      row.monthly_cost = monthlyCost;
-    } else if (knownExpenseColumns.has('amount')) {
-      row.amount = monthlyCost;
-    } else if (knownExpenseColumns.has('monthly_amount')) {
-      row.monthly_amount = monthlyCost;
-    } else {
-      row.monthly_cost = monthlyCost;
-    }
-
-    // bunny_share and monkey_share
-    if (knownExpenseColumns.has('bunny_share')) {
-      row.bunny_share = bunny_share;
-    }
-    if (knownExpenseColumns.has('monkey_share')) {
-      row.monkey_share = monkey_share;
-    }
-
-    // NEVER include custom_bunny_percent or custom_monkey_percent
-    return row;
-  }
-
-  // Default exact schema: item, category, type, split_logic, monthly_cost, bunny_share, monkey_share
-  // Explicitly NO custom_bunny_percent or custom_monkey_percent
+  // Strictly exact schema: id, item, category, type, split_logic, monthly_cost, bunny_share, monkey_share
   return {
-    id: String(exp.id),
-    item: title,
+    id,
+    item: title || 'Expense',
     category,
     type,
     split_logic: splitLogic,
@@ -599,15 +546,15 @@ export async function persistEntireStateToSupabase(state: HouseholdState): Promi
           onConflict: 'id',
         });
         if (expErr) {
-          console.error('[Supabase State Sync Error]: Failed to batch upsert expenses table:', expErr.message || expErr, { rows: expRows, error: expErr });
+          console.error("Expense Save Error:", expErr);
           for (const exp of state.expenses) {
             await insertOrUpdateExpenseInSupabase(exp, state.partners).catch((itemErr) => {
-              console.error('[Supabase State Sync Expense Item Error]:', itemErr);
+              console.error("Expense Save Error:", itemErr);
             });
           }
         }
       } catch (expSyncErr) {
-        console.error('[Supabase State Sync Expenses Exception]:', expSyncErr);
+        console.error("Expense Save Error:", expSyncErr);
       }
     }
 
@@ -847,8 +794,11 @@ export async function fetchCommittedTransactionsFromSupabase(): Promise<Statemen
 
 /**
  * Real-time CRUD: Add or update a household expense directly in Supabase.
- * Ensures payload matches table schema exactly (item or name, category, type, split_logic or split, monthly_cost or amount, bunny_share, monkey_share)
- * and excludes custom_bunny_percent / custom_monkey_percent to avoid schema mismatch errors.
+ * Strictly sends exact, valid database columns:
+ *   id, item, category, type, split_logic, monthly_cost, bunny_share, monkey_share
+ * without mismatched or missing property keys.
+ * If on_conflict is specified, the target column is strictly 'id'.
+ * Wrapped in try/catch with explicit console.error("Expense Save Error:", error) logging.
  */
 export async function insertOrUpdateExpenseInSupabase(
   expense: HouseholdExpense,
@@ -856,99 +806,39 @@ export async function insertOrUpdateExpenseInSupabase(
 ): Promise<void> {
   if (!isSupabaseConfigured()) return;
   try {
-    // If table columns have not been detected yet, attempt a quick peek to learn existing column names
-    if (!knownExpenseColumns) {
-      try {
-        const { data: peekData } = await supabase.from('expenses').select('*').limit(1);
-        if (peekData && peekData.length > 0) {
-          setKnownExpenseColumns(Object.keys(peekData[0]));
-        }
-      } catch (peekErr) {
-        // Non-fatal peek attempt
-      }
-    }
+    const payload: SupabaseExpenseRow = mapExpenseToRow(expense, partners);
 
-    const primaryRow = mapExpenseToRow(expense, partners);
-
-    // Attempt 1: Upsert with mapped primary row
-    const { error: primaryError } = await supabase
+    // Primary mutation: Upsert strictly targeting conflict column 'id'
+    const { error: upsertError } = await supabase
       .from('expenses')
-      .upsert(primaryRow, { onConflict: 'id' });
+      .upsert(payload, { onConflict: 'id' });
 
-    if (!primaryError) {
-      setKnownExpenseColumns(Object.keys(primaryRow));
-      return;
-    }
+    if (upsertError) {
+      console.error("Expense Save Error:", upsertError);
 
-    console.error('[Supabase Expenses Upsert Error]:', primaryError.message || primaryError, {
-      payload: primaryRow,
-      error: primaryError,
-    });
-
-    const errMsg = (primaryError.message || '').toLowerCase();
-    const isColumnError =
-      primaryError.code === '42703' ||
-      errMsg.includes('column') ||
-      errMsg.includes('does not exist');
-
-    if (isColumnError) {
-      // Attempt 2: Alternative column names (name instead of item, amount instead of monthly_cost, split instead of split_logic)
-      const altRow: Record<string, any> = {
-        id: primaryRow.id,
-        name: primaryRow.item || primaryRow.name || expense.title,
-        category: primaryRow.category,
-        type: primaryRow.type,
-        split: primaryRow.split_logic || primaryRow.split || 'Proportional',
-        amount: primaryRow.monthly_cost ?? primaryRow.amount ?? expense.monthlyAmount,
-        bunny_share: primaryRow.bunny_share,
-        monkey_share: primaryRow.monkey_share,
-      };
-
-      const { error: altError } = await supabase
+      // Fallback: If upsert failed, attempt update by 'id'
+      const { error: updateError } = await supabase
         .from('expenses')
-        .upsert(altRow, { onConflict: 'id' });
+        .update(payload)
+        .eq('id', payload.id);
 
-      if (!altError) {
-        setKnownExpenseColumns(Object.keys(altRow));
-        return;
-      }
+      if (updateError) {
+        console.error("Expense Save Error:", updateError);
 
-      console.error('[Supabase Expenses Alt Upsert Error]:', altError.message || altError, {
-        payload: altRow,
-        error: altError,
-      });
-
-      // Attempt 3: If a specific column name was flagged in the error, strip that column and retry
-      const missingMatch =
-        primaryError.message?.match(/column "([^"]+)"/i) ||
-        altError.message?.match(/column "([^"]+)"/i);
-
-      if (missingMatch && missingMatch[1]) {
-        const missingCol = missingMatch[1];
-        const strippedRow = { ...primaryRow };
-        delete strippedRow[missingCol];
-
-        const { error: stripErr } = await supabase
+        // Fallback: If update failed because record does not exist yet, attempt insert
+        const { error: insertError } = await supabase
           .from('expenses')
-          .upsert(strippedRow, { onConflict: 'id' });
+          .insert(payload);
 
-        if (!stripErr) {
-          setKnownExpenseColumns(Object.keys(strippedRow));
-          return;
+        if (insertError) {
+          console.error("Expense Save Error:", insertError);
+          throw insertError;
         }
-        console.error('[Supabase Expenses Stripped Upsert Error]:', stripErr.message || stripErr);
       }
-
-      throw altError || primaryError;
     }
-
-    throw primaryError;
-  } catch (err: any) {
-    console.error('[Supabase Expenses Insert/Update Exception]:', err?.message || err, {
-      expense,
-      err,
-    });
-    throw err;
+  } catch (error: any) {
+    console.error("Expense Save Error:", error);
+    throw error;
   }
 }
 
@@ -960,12 +850,12 @@ export async function deleteExpenseFromSupabase(expenseId: string): Promise<void
   try {
     const { error } = await supabase.from('expenses').delete().eq('id', expenseId);
     if (error) {
-      console.error('[Supabase Expenses Delete Error]:', error.message || error, { expenseId, error });
+      console.error("Expense Save Error:", error);
       throw error;
     }
-  } catch (err: any) {
-    console.error('[Supabase Expenses Delete Exception]:', err?.message || err, { expenseId, err });
-    throw err;
+  } catch (error: any) {
+    console.error("Expense Save Error:", error);
+    throw error;
   }
 }
 
