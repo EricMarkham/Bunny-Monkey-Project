@@ -36,17 +36,25 @@ export function sanitizeAndMigrateState(parsed: any): HouseholdState {
     sinkingFunds: Array.isArray(parsed.sinkingFunds)
       ? parsed.sinkingFunds
       : initialHouseholdState.sinkingFunds,
-    milestones: Array.isArray(parsed.milestones)
-      ? parsed.milestones
-      : initialHouseholdState.milestones,
-    trips: Array.isArray(parsed.trips) ? parsed.trips : initialHouseholdState.trips,
-    activeTripId: parsed.activeTripId || initialHouseholdState.activeTripId,
-    tripExpenses: Array.isArray(parsed.tripExpenses)
-      ? parsed.tripExpenses
-      : initialHouseholdState.tripExpenses,
-    tripSettlements: Array.isArray(parsed.tripSettlements)
-      ? parsed.tripSettlements
-      : initialHouseholdState.tripSettlements,
+    milestones: (() => {
+      const totalSinkingReserves = Array.isArray(parsed.sinkingFunds)
+        ? parsed.sinkingFunds.reduce((sum: number, f: any) => sum + (Number(f.currentBalance) || 0), 0)
+        : initialHouseholdState.sinkingFunds.reduce((sum, f) => sum + (f.currentBalance || 0), 0);
+      const baseMilestones = Array.isArray(parsed.milestones) && parsed.milestones.length > 0
+        ? parsed.milestones
+        : initialHouseholdState.milestones;
+      return baseMilestones.map((m: any) => {
+        const target = Number(m.targetAmount) || 0;
+        const unlocked = totalSinkingReserves > 0 && totalSinkingReserves >= target;
+        return {
+          ...m,
+          targetAmount: target,
+          currentAmount: totalSinkingReserves,
+          unlocked,
+          unlockedDate: unlocked ? m.unlockedDate : undefined,
+        };
+      });
+    })(),
     statementTransactions:
       Array.isArray(parsed.statementTransactions)
         ? sanitizeTransactions(parsed.statementTransactions)

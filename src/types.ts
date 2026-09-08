@@ -61,54 +61,6 @@ export interface GamifiedMilestone {
   tier: 'bronze' | 'silver' | 'gold' | 'platinum' | 'diamond';
 }
 
-export interface Trip {
-  id: string;
-  name: string;
-  destination: string;
-  startDate: string;
-  endDate: string;
-  budget: number;
-}
-
-export type TripCategory =
-  | 'Flights'
-  | 'Hotel'
-  | 'Dining'
-  | 'Transit'
-  | 'Activities'
-  | 'Shopping'
-  | 'Misc';
-
-export type TripPayer = 'bunny' | 'monkey' | 'joint' | 'sinking_fund';
-export type TripSplitRatio = '50/50' | '100% Bunny' | '100% Monkey' | 'custom';
-
-export interface TripExpense {
-  id: string;
-  tripId: string;
-  date: string;
-  category: TripCategory;
-  description: string;
-  totalCost: number;
-  paidBy: TripPayer;
-  splitRatio?: TripSplitRatio;
-  customBunnyPercent?: number;
-  customMonkeyPercent?: number;
-  fundedBySinkingFund?: boolean;
-  sinkingFundId?: string;
-  reimbursedAmount?: number;
-  notes?: string;
-}
-
-export interface TripSettlement {
-  id: string;
-  tripId: string;
-  date: string;
-  payer: PartnerId;
-  receiver: PartnerId;
-  amount: number;
-  note: string;
-}
-
 export type StatementCategory =
   | 'Groceries'
   | 'Dining'
@@ -190,6 +142,8 @@ export interface DividendHolding {
   dripEnabled: boolean;
 }
 
+export type TabType = 'budget' | 'actuals' | 'statement' | 'dividends';
+
 export interface HouseholdState {
   partners: {
     bunny: Partner;
@@ -198,10 +152,6 @@ export interface HouseholdState {
   expenses: HouseholdExpense[];
   sinkingFunds: SinkingFund[];
   milestones: GamifiedMilestone[];
-  trips: Trip[];
-  activeTripId: string;
-  tripExpenses: TripExpense[];
-  tripSettlements: TripSettlement[];
   statementTransactions: StatementTransaction[];
   holdings: DividendHolding[];
   dripSettings: {

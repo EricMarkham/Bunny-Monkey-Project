@@ -161,9 +161,20 @@ export function BudgetModule({
         console.error('[Supabase Sinking Funds Fetch Error]:', sfRes.error.message || sfRes.error);
         setDbError(`Failed to fetch sinking funds: ${sfRes.error.message}`);
       } else if (sfRes.data) {
+        const mappedFunds = sfRes.data.map(mapRowToSinkingFund);
+        const totalSinking = mappedFunds.reduce((sum, f) => sum + f.currentBalance, 0);
         onUpdateState((prev) => ({
           ...prev,
-          sinkingFunds: sfRes.data.map(mapRowToSinkingFund),
+          sinkingFunds: mappedFunds,
+          milestones: prev.milestones.map((m) => ({
+            ...m,
+            unlocked: totalSinking >= m.targetAmount,
+            currentAmount: totalSinking,
+            unlockedDate:
+              totalSinking >= m.targetAmount
+                ? m.unlockedDate || new Date().toISOString().split('T')[0]
+                : undefined,
+          })),
         }));
       }
       const remotePartners =
@@ -200,7 +211,7 @@ export function BudgetModule({
         setMonkeyNetInput(mNet.toString());
         setMonkeyGrossInput(mGross.toString());
       }
-      setSyncStatus('✓ Synced with Supabase');
+      setSyncStatus('✓ Synced with cloud');
       setTimeout(() => setSyncStatus(null), 3000);
     } catch (err) {
       console.warn('Sync error:', err);

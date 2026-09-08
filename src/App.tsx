@@ -1,17 +1,14 @@
 import React, { useState, useEffect } from 'react';
 import { initialHouseholdState } from './data/initialData';
-import { HouseholdState, Partner } from './types';
+import { HouseholdState, Partner, TabType } from './types';
 import { Navbar } from './components/Navbar';
 import { BudgetModule } from './components/BudgetModule';
 import { BudgetVsActualsDashboard } from './components/BudgetVsActualsDashboard';
-import { TripSettlementModule } from './components/TripSettlementModule';
 import { StatementParserModule } from './components/StatementParserModule';
 import { DividendTrackerModule } from './components/DividendTrackerModule';
-import { StoragePersistenceModal } from './components/StoragePersistenceModal';
 import { HouseholdEntryGate } from './components/HouseholdEntryGate';
 import {
   saveHouseholdState,
-  loadHouseholdState,
   sanitizeAndMigrateState,
   isSupabaseConfigured,
 } from './utils/storage';
@@ -21,7 +18,7 @@ import {
 } from './services/supabaseService';
 
 export default function App() {
-  // Household Entry Gate Access State (Secure memory-only session, zero localStorage)
+  // Household Entry Gate Access State (Secure memory-only session)
   const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false);
 
   // Household Financial State: initialized from memory, dynamically hydrated from Supabase on mount
@@ -29,11 +26,14 @@ export default function App() {
   const [isSupabaseConnected, setIsSupabaseConnected] = useState<boolean>(false);
   const [isLoadingFromSupabase, setIsLoadingFromSupabase] = useState<boolean>(true);
 
-  const [activeTab, setActiveTab] = useState<'budget' | 'actuals' | 'trips' | 'statement' | 'dividends'>('budget');
-  const [showResetConfirm, setShowResetConfirm] = useState(false);
-  const [showStorageModal, setShowStorageModal] = useState(false);
+  const [activeTab, setActiveTab] = useState<TabType>('budget');
 
-  // Dynamically fetch fresh state from Supabase PostgreSQL tables on load
+  // Set document title explicitly
+  useEffect(() => {
+    document.title = 'Bunny & Monkey Family Budget Tool';
+  }, []);
+
+  // Dynamically fetch fresh state from Supabase on load
   useEffect(() => {
     let isMounted = true;
     setIsLoadingFromSupabase(true);
@@ -72,7 +72,7 @@ export default function App() {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `bunny_monkey_finance_backup_${new Date().toISOString().split('T')[0]}.json`;
+    a.download = `bunny_monkey_budget_backup_${new Date().toISOString().split('T')[0]}.json`;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
@@ -84,13 +84,6 @@ export default function App() {
     const sanitized = sanitizeAndMigrateState(importedData);
     setState(sanitized);
     saveHouseholdState(sanitized);
-  };
-
-  // Reset to default demo data
-  const handleResetDemo = () => {
-    setState(initialHouseholdState);
-    saveHouseholdState(initialHouseholdState);
-    setShowResetConfirm(false);
   };
 
   // Update Partner Info
@@ -112,7 +105,7 @@ export default function App() {
     });
   };
 
-  // Lock / Sign out of Household session (clears memory state, zero localStorage)
+  // Lock / Sign out of Household session
   const handleLock = () => {
     setIsAuthenticated(false);
   };
@@ -143,9 +136,7 @@ export default function App() {
         setActiveTab={setActiveTab}
         onExportJSON={handleExportJSON}
         onImportJSON={handleImportJSON}
-        onResetDemo={() => setShowResetConfirm(true)}
         onUpdatePartner={handleUpdatePartner}
-        onOpenStorageModal={() => setShowStorageModal(true)}
         onLock={handleLock}
       />
 
@@ -176,10 +167,6 @@ export default function App() {
           />
         )}
 
-        {activeTab === 'trips' && (
-          <TripSettlementModule state={state} onUpdateState={setState} />
-        )}
-
         {activeTab === 'dividends' && (
           <DividendTrackerModule state={state} onUpdateState={setState} />
         )}
@@ -189,73 +176,20 @@ export default function App() {
       <footer className="relative z-10 border-t border-white/10 py-5 2xl:py-6 text-center text-xs 2xl:text-sm text-slate-400 bg-white/5 backdrop-blur-md mt-auto">
         <div className="max-w-[2000px] w-full mx-auto px-4 sm:px-6 lg:px-8 2xl:px-12 flex flex-col sm:flex-row items-center justify-between gap-3">
           <div className="flex items-center space-x-2">
-            <span className="font-semibold text-slate-200 2xl:text-base">🐰 Bunny &amp; 🐵 Monkey Co-Op</span>
+            <span className="font-semibold text-slate-200 2xl:text-base">🐰 Bunny &amp; 🐵 Monkey Family Budget Tool</span>
             <span className="text-white/20">•</span>
-            <button
-              onClick={() => setShowStorageModal(true)}
-              className="flex items-center gap-1.5 text-[10px] 2xl:text-xs uppercase tracking-wider text-emerald-400 hover:text-emerald-300 font-semibold transition-colors cursor-pointer"
-              title="Click to view Supabase database persistence vault & backups"
-            >
+            <div className="flex items-center gap-1.5 text-[10px] 2xl:text-xs uppercase tracking-wider text-emerald-400 font-semibold">
               <span className={`w-1.5 h-1.5 rounded-full ${isSupabaseConnected ? 'bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.8)] animate-pulse' : 'bg-amber-400'}`} />
-              {isSupabaseConnected ? 'Supabase PostgreSQL Cloud Active (Zero LocalStorage)' : 'Supabase Backend Sync Ready'}
-            </button>
+              {isSupabaseConnected ? 'Cloud Sync Active' : 'Cloud Sync Ready'}
+            </div>
           </div>
           <div className="flex items-center gap-2 text-[11px] 2xl:text-xs text-slate-400">
-            <button
-              onClick={() => setShowStorageModal(true)}
-              className="px-2 py-0.5 rounded-md bg-emerald-500/10 border border-emerald-500/30 text-emerald-300 hover:bg-emerald-500/20 transition-colors cursor-pointer"
-            >
-              Database Vault &amp; Snapshots
-            </button>
-            <span className="px-2 py-0.5 rounded-md bg-white/5 border border-white/10 text-slate-300">
-              Dual-Earner OS
-            </span>
             <span className="px-2 py-0.5 rounded-md bg-white/5 border border-white/10 text-slate-300">
               TFSA / RRSP / RESP
             </span>
           </div>
         </div>
       </footer>
-
-      {/* Storage Persistence & Backup Modal */}
-      {showStorageModal && (
-        <StoragePersistenceModal
-          state={state}
-          onRestoreState={(newState) => {
-            setState(newState);
-            setShowStorageModal(false);
-          }}
-          onClose={() => setShowStorageModal(false)}
-        />
-      )}
-
-      {/* Reset Confirmation Modal */}
-      {showResetConfirm && (
-        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-md flex items-center justify-center p-4">
-          <div className="bg-slate-900/95 backdrop-blur-xl rounded-2xl max-w-sm w-full p-6 border border-white/20 shadow-2xl">
-            <h3 className="text-base font-bold text-slate-100 mb-2">
-              Reset Demo Data?
-            </h3>
-            <p className="text-xs text-slate-400 mb-4 leading-relaxed">
-              This will restore the pre-populated dual-earner financial scenario for Bunny &amp; Monkey.
-            </p>
-            <div className="flex justify-end space-x-2">
-              <button
-                onClick={() => setShowResetConfirm(false)}
-                className="px-4 py-2 rounded-xl text-xs font-medium text-slate-300 hover:bg-white/10 border border-white/10 transition-colors"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handleResetDemo}
-                className="px-4 py-2 rounded-xl text-xs font-semibold bg-rose-600 hover:bg-rose-500 border border-rose-400/50 text-white shadow-lg shadow-rose-600/20 transition-all"
-              >
-                Confirm Reset
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 }

@@ -2,29 +2,22 @@ import React, { useRef } from 'react';
 import {
   Download,
   Upload,
-  RotateCcw,
-  Sparkles,
   Wallet,
-  Plane,
   Receipt,
   TrendingUp,
-  CheckCircle2,
   BarChart3,
-  Database,
   Lock,
 } from 'lucide-react';
-import { HouseholdState, Partner } from '../types';
+import { HouseholdState, Partner, TabType } from '../types';
 import { formatCurrency } from '../utils/finance';
 
 interface NavbarProps {
   state: HouseholdState;
-  activeTab: 'budget' | 'actuals' | 'trips' | 'statement' | 'dividends';
-  setActiveTab: (tab: 'budget' | 'actuals' | 'trips' | 'statement' | 'dividends') => void;
+  activeTab: TabType;
+  setActiveTab: (tab: TabType) => void;
   onExportJSON: () => void;
   onImportJSON: (importedData: HouseholdState) => void;
-  onResetDemo: () => void;
   onUpdatePartner: (partnerKey: 'bunny' | 'monkey', updated: Partial<Partner>) => void;
-  onOpenStorageModal?: () => void;
   onLock?: () => void;
 }
 
@@ -34,8 +27,6 @@ export function Navbar({
   setActiveTab,
   onExportJSON,
   onImportJSON,
-  onResetDemo,
-  onOpenStorageModal,
   onLock,
 }: NavbarProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -93,11 +84,8 @@ export function Navbar({
           <div>
             <div className="flex items-center space-x-2">
               <h1 className="text-base 2xl:text-xl font-bold text-white leading-tight tracking-tight">
-                Bunny &amp; Monkey Co-Op
+                Bunny &amp; Monkey Family Budget Tool
               </h1>
-              <span className="text-[10px] 2xl:text-xs font-bold uppercase tracking-widest bg-indigo-500/20 text-indigo-300 px-2 py-0.5 rounded-full border border-indigo-500/40">
-                Dual-Earner OS
-              </span>
             </div>
             <p className="text-[11px] 2xl:text-xs uppercase tracking-wider text-slate-400">
               Joint Budgeting • Budget vs. Actuals • Statement Ledger • Dividend DRIP
@@ -146,31 +134,19 @@ export function Navbar({
           {/* Sinking Cash Reserve */}
           <div className="hidden lg:flex flex-col px-3 py-1.5 2xl:px-4 2xl:py-2 rounded-xl bg-indigo-900/40 backdrop-blur-md border border-indigo-500/30">
             <span className="text-[10px] 2xl:text-xs text-indigo-300 font-semibold uppercase tracking-widest">
-              Sinking Vault
+              Sinking Reserves
             </span>
             <span className="text-xs 2xl:text-sm font-bold font-mono text-indigo-200">
               {formatCurrency(totalSinkingBalance)}
             </span>
           </div>
 
-          {/* Actions: Storage Vault, Export, Import, Reset */}
+          {/* Actions: Export, Import, Lock */}
           <div className="flex items-center space-x-1.5 border-l border-white/10 pl-2">
-            {onOpenStorageModal && (
-              <button
-                onClick={onOpenStorageModal}
-                title="Data Persistence & Backup Vault (Saved to Browser)"
-                className="flex items-center space-x-1.5 px-2.5 py-1.5 text-xs text-emerald-300 bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/30 rounded-xl transition-all shadow-sm"
-              >
-                <Database className="w-3.5 h-3.5 text-emerald-400" />
-                <span className="hidden sm:inline font-semibold">Storage Vault</span>
-                <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-              </button>
-            )}
-
             <button
               onClick={onExportJSON}
               title="Export household data backup (JSON)"
-              className="p-2 text-slate-300 hover:text-white bg-white/5 hover:bg-white/15 border border-white/10 rounded-xl transition-all"
+              className="p-2 text-slate-300 hover:text-white bg-white/5 hover:bg-white/15 border border-white/10 rounded-xl transition-all cursor-pointer"
             >
               <Download className="w-3.5 h-3.5" />
             </button>
@@ -178,7 +154,7 @@ export function Navbar({
             <button
               onClick={() => fileInputRef.current?.click()}
               title="Import household JSON data"
-              className="p-2 text-slate-300 hover:text-white bg-white/5 hover:bg-white/15 border border-white/10 rounded-xl transition-all"
+              className="p-2 text-slate-300 hover:text-white bg-white/5 hover:bg-white/15 border border-white/10 rounded-xl transition-all cursor-pointer"
             >
               <Upload className="w-3.5 h-3.5" />
             </button>
@@ -190,19 +166,11 @@ export function Navbar({
               className="hidden"
             />
 
-            <button
-              onClick={onResetDemo}
-              title="Reset to default demo data"
-              className="p-2 text-slate-400 hover:text-rose-400 bg-white/5 hover:bg-rose-500/20 border border-white/10 rounded-xl transition-all"
-            >
-              <RotateCcw className="w-3.5 h-3.5" />
-            </button>
-
             {onLock && (
               <button
                 onClick={onLock}
                 title="Lock session & require household passcode"
-                className="flex items-center space-x-1.5 p-2 px-2.5 text-slate-300 hover:text-amber-300 bg-white/5 hover:bg-amber-500/15 border border-white/10 rounded-xl transition-all"
+                className="flex items-center space-x-1.5 p-2 px-2.5 text-slate-300 hover:text-amber-300 bg-white/5 hover:bg-amber-500/15 border border-white/10 rounded-xl transition-all cursor-pointer"
                 aria-label="Lock app"
               >
                 <Lock className="w-3.5 h-3.5" />
@@ -217,7 +185,7 @@ export function Navbar({
       <div className="max-w-[2000px] w-full mx-auto px-4 sm:px-6 lg:px-8 2xl:px-12 flex space-x-1 sm:space-x-2 2xl:space-x-3 overflow-x-auto no-scrollbar border-t border-white/10 pt-1">
         <button
           onClick={() => setActiveTab('budget')}
-          className={`flex items-center space-x-2 2xl:space-x-2.5 py-2.5 2xl:py-3.5 px-3.5 2xl:px-5 text-xs sm:text-sm 2xl:text-base font-semibold rounded-t-xl transition-all whitespace-nowrap border-b-2 ${
+          className={`flex items-center space-x-2 2xl:space-x-2.5 py-2.5 2xl:py-3.5 px-3.5 2xl:px-5 text-xs sm:text-sm 2xl:text-base font-semibold rounded-t-xl transition-all whitespace-nowrap border-b-2 cursor-pointer ${
             activeTab === 'budget'
               ? 'border-rose-400 text-rose-300 bg-white/10 shadow-inner'
               : 'border-transparent text-slate-400 hover:text-slate-200 hover:bg-white/5'
@@ -229,7 +197,7 @@ export function Navbar({
 
         <button
           onClick={() => setActiveTab('actuals')}
-          className={`flex items-center space-x-2 2xl:space-x-2.5 py-2.5 2xl:py-3.5 px-3.5 2xl:px-5 text-xs sm:text-sm 2xl:text-base font-semibold rounded-t-xl transition-all whitespace-nowrap border-b-2 ${
+          className={`flex items-center space-x-2 2xl:space-x-2.5 py-2.5 2xl:py-3.5 px-3.5 2xl:px-5 text-xs sm:text-sm 2xl:text-base font-semibold rounded-t-xl transition-all whitespace-nowrap border-b-2 cursor-pointer ${
             activeTab === 'actuals'
               ? 'border-amber-400 text-amber-300 bg-white/10 shadow-inner'
               : 'border-transparent text-slate-400 hover:text-slate-200 hover:bg-white/5'
@@ -241,7 +209,7 @@ export function Navbar({
 
         <button
           onClick={() => setActiveTab('statement')}
-          className={`flex items-center space-x-2 2xl:space-x-2.5 py-2.5 2xl:py-3.5 px-3.5 2xl:px-5 text-xs sm:text-sm 2xl:text-base font-semibold rounded-t-xl transition-all whitespace-nowrap border-b-2 ${
+          className={`flex items-center space-x-2 2xl:space-x-2.5 py-2.5 2xl:py-3.5 px-3.5 2xl:px-5 text-xs sm:text-sm 2xl:text-base font-semibold rounded-t-xl transition-all whitespace-nowrap border-b-2 cursor-pointer ${
             activeTab === 'statement'
               ? 'border-indigo-400 text-indigo-300 bg-white/10 shadow-inner'
               : 'border-transparent text-slate-400 hover:text-slate-200 hover:bg-white/5'
@@ -252,25 +220,8 @@ export function Navbar({
         </button>
 
         <button
-          onClick={() => setActiveTab('trips')}
-          className={`flex items-center space-x-2 2xl:space-x-2.5 py-2.5 2xl:py-3.5 px-3.5 2xl:px-5 text-xs sm:text-sm 2xl:text-base font-semibold rounded-t-xl transition-all whitespace-nowrap border-b-2 ${
-            activeTab === 'trips'
-              ? 'border-teal-400 text-teal-300 bg-white/10 shadow-inner'
-              : 'border-transparent text-slate-400 hover:text-slate-200 hover:bg-white/5'
-          }`}
-        >
-          <Plane className="w-4 h-4 2xl:w-5 2xl:h-5" />
-          <span>Trip &amp; Vacation Tracker</span>
-          {state.tripExpenses.length > 0 && (
-            <span className="text-[10px] 2xl:text-xs bg-teal-500/20 text-teal-300 border border-teal-500/40 font-mono px-1.5 py-0.2 rounded-full">
-              {state.tripExpenses.length}
-            </span>
-          )}
-        </button>
-
-        <button
           onClick={() => setActiveTab('dividends')}
-          className={`flex items-center space-x-2 2xl:space-x-2.5 py-2.5 2xl:py-3.5 px-3.5 2xl:px-5 text-xs sm:text-sm 2xl:text-base font-semibold rounded-t-xl transition-all whitespace-nowrap border-b-2 ${
+          className={`flex items-center space-x-2 2xl:space-x-2.5 py-2.5 2xl:py-3.5 px-3.5 2xl:px-5 text-xs sm:text-sm 2xl:text-base font-semibold rounded-t-xl transition-all whitespace-nowrap border-b-2 cursor-pointer ${
             activeTab === 'dividends'
               ? 'border-violet-400 text-violet-300 bg-white/10 shadow-inner'
               : 'border-transparent text-slate-400 hover:text-slate-200 hover:bg-white/5'

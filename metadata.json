@@ -1,6 +1,6 @@
 {
-  "name": "Bunny & Monkey Household Finance",
-  "description": "A dual-earner financial operating system for Bunny & Monkey: joint budgeting, budget vs. actuals tracking, vacation expense tracking from sinking funds, statement parsing with ledger, and equity dividend growth tracking with Piggy.",
+  "name": "Bunny & Monkey Family Budget Tool",
+  "description": "Joint budgeting, budget vs. actuals tracking, statement parsing with ledger, and equity dividend growth tracking for Bunny & Monkey.",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

@@ -5,9 +5,6 @@ import {
   StatementTransaction,
   HouseholdExpense,
   SinkingFund,
-  Trip,
-  TripExpense,
-  TripSettlement,
   Partner,
 } from '../types';
 import { initialHouseholdState } from '../data/initialData';
@@ -215,100 +212,6 @@ export function mapSinkingFundToRow(sf: any): Record<string, any> {
 }
 
 /**
- * Maps database trip row to Trip
- */
-export function mapRowToTrip(row: any): Trip {
-  return {
-    id: String(row.id),
-    name: row.name || '',
-    destination: row.destination || '',
-    startDate: row.start_date || row.startDate || '',
-    endDate: row.end_date || row.endDate || '',
-    budget: Number(row.budget) || 0,
-  };
-}
-
-export function mapTripToRow(trip: Trip): Record<string, any> {
-  return {
-    id: trip.id,
-    name: trip.name,
-    destination: trip.destination,
-    start_date: trip.startDate,
-    end_date: trip.endDate,
-    budget: Number(trip.budget) || 0,
-  };
-}
-
-/**
- * Maps database trip expense row to TripExpense
- */
-export function mapRowToTripExpense(row: any): TripExpense {
-  return {
-    id: String(row.id),
-    tripId: row.trip_id || row.tripId || '',
-    date: row.date || '',
-    category: row.category || 'Misc',
-    description: row.description || '',
-    totalCost: Number(row.total_cost ?? row.totalCost ?? row.amount ?? row.cost) || 0,
-    paidBy: row.paid_by || row.paidBy || 'bunny',
-    splitRatio: row.split_ratio || row.splitRatio || '50/50',
-    customBunnyPercent: row.custom_bunny_percent ?? row.customBunnyPercent,
-    customMonkeyPercent: row.custom_monkey_percent ?? row.customMonkeyPercent,
-    fundedBySinkingFund: Boolean(row.funded_by_sinking_fund ?? row.fundedBySinkingFund ?? false),
-    sinkingFundId: row.sinking_fund_id || row.sinkingFundId || undefined,
-    reimbursedAmount: row.reimbursed_amount !== undefined ? Number(row.reimbursed_amount) : undefined,
-    notes: row.notes || undefined,
-  };
-}
-
-export function mapTripExpenseToRow(te: TripExpense): Record<string, any> {
-  return {
-    id: te.id,
-    trip_id: te.tripId,
-    date: te.date,
-    category: te.category,
-    description: te.description,
-    total_cost: te.totalCost,
-    paid_by: te.paidBy,
-    split_ratio: te.splitRatio || '50/50',
-    custom_bunny_percent: te.customBunnyPercent ?? null,
-    custom_monkey_percent: te.customMonkeyPercent ?? null,
-    funded_by_sinking_fund: Boolean(te.fundedBySinkingFund),
-    sinking_fund_id: te.sinkingFundId ?? null,
-    reimbursed_amount: te.reimbursedAmount ?? null,
-    notes: te.notes ?? null,
-  };
-}
-
-/**
- * Maps database trip settlement row to TripSettlement
- */
-export function mapRowToTripSettlement(row: any): TripSettlement {
-  return {
-    id: String(row.id),
-    tripId: row.trip_id || row.tripId || '',
-    date: row.date || '',
-    payer: row.payer || 'bunny',
-    receiver: row.receiver || 'monkey',
-    amount: Number(row.amount) || 0,
-    note: row.note || undefined,
-  };
-}
-
-export function mapTripSettlementToRow(ts: TripSettlement): Record<string, any> {
-  return {
-    id: ts.id,
-    trip_id: ts.tripId,
-    date: ts.date,
-    payer: ts.payer,
-    receiver: ts.receiver,
-    amount: ts.amount,
-    note: ts.note ?? null,
-    updated_at: new Date().toISOString(),
-  };
-}
-
-/**
  * Fetch complete dynamic state directly from Supabase tables
  */
 export async function fetchHouseholdStateFromSupabase(): Promise<{
@@ -370,9 +273,6 @@ export async function fetchHouseholdStateFromSupabase(): Promise<{
       transactionsRes,
       expensesRes,
       sinkingFundsRes,
-      tripsRes,
-      tripExpensesRes,
-      tripSettlementsRes,
     ] = await Promise.all([
       supabase.from('holdings').select('*'),
       // Fetch from 'transactions' table first, with fallback to 'statement_transactions'
@@ -427,9 +327,6 @@ export async function fetchHouseholdStateFromSupabase(): Promise<{
       })(),
       supabase.from('expenses').select('*'),
       supabase.from('sinking_funds').select('*'),
-      supabase.from('trips').select('*'),
-      supabase.from('trip_expenses').select('*'),
-      supabase.from('trip_settlements').select('*'),
     ]);
 
     // Check if brand new empty database with zero data across all tables
@@ -437,7 +334,6 @@ export async function fetchHouseholdStateFromSupabase(): Promise<{
       !unifiedData?.state &&
       !hasSettingsData &&
       (!expensesRes.data || expensesRes.data.length === 0) &&
-      (!tripsRes.data || tripsRes.data.length === 0) &&
       (!holdingsRes.data || holdingsRes.data.length === 0) &&
       (!transactionsRes.data || transactionsRes.data.length === 0);
 
@@ -464,18 +360,6 @@ export async function fetchHouseholdStateFromSupabase(): Promise<{
         !sinkingFundsRes.error && sinkingFundsRes.data
           ? sinkingFundsRes.data.map(mapRowToSinkingFund)
           : baseState.sinkingFunds,
-      trips:
-        !tripsRes.error && tripsRes.data
-          ? tripsRes.data.map(mapRowToTrip)
-          : baseState.trips,
-      tripExpenses:
-        !tripExpensesRes.error && tripExpensesRes.data
-          ? tripExpensesRes.data.map(mapRowToTripExpense)
-          : baseState.tripExpenses,
-      tripSettlements:
-        !tripSettlementsRes.error && tripSettlementsRes.data
-          ? tripSettlementsRes.data.map(mapRowToTripSettlement)
-          : baseState.tripSettlements,
     };
 
     return { state: resolvedState, isLiveSupabase: true };
@@ -568,39 +452,6 @@ export async function persistEntireStateToSupabase(state: HouseholdState): Promi
           const { error: fbErr } = await supabase.from('statement_transactions').upsert(fallbackRows, { onConflict: 'id' });
           if (fbErr) console.error('Supabase Error:', fbErr);
         }
-      }
-    }
-
-    // 6. Sync trips table
-    if (state.trips && state.trips.length > 0) {
-      const tripRows = state.trips.map(mapTripToRow);
-      const { error: tripsErr } = await supabase.from('trips').upsert(tripRows, {
-        onConflict: 'id',
-      });
-      if (tripsErr) {
-        console.error('Supabase Error:', tripsErr);
-      }
-    }
-
-    // 7. Sync trip expenses table
-    if (state.tripExpenses && state.tripExpenses.length > 0) {
-      const expRows = state.tripExpenses.map(mapTripExpenseToRow);
-      const { error: expErr } = await supabase.from('trip_expenses').upsert(expRows, {
-        onConflict: 'id',
-      });
-      if (expErr) {
-        console.error('Supabase Error:', expErr);
-      }
-    }
-
-    // 8. Sync trip settlements table
-    if (state.tripSettlements && state.tripSettlements.length > 0) {
-      const { error: setErr } = await supabase.from('trip_settlements').upsert(
-        state.tripSettlements.map(mapTripSettlementToRow),
-        { onConflict: 'id' }
-      );
-      if (setErr) {
-        console.error('Supabase Error:', setErr);
       }
     }
 
@@ -907,86 +758,6 @@ export async function updateSinkingFundBalanceInSupabase(
   } catch (err: any) {
     console.error('[Supabase Sinking Funds Balance Update Exception]:', err?.message || err, { fundId, newBalance, err });
     throw err;
-  }
-}
-
-/**
- * Real-time CRUD: Add or update a trip directly in Supabase
- */
-export async function insertOrUpdateTripInSupabase(trip: Trip): Promise<void> {
-  if (!isSupabaseConfigured()) return;
-  try {
-    const row = mapTripToRow(trip);
-    const { error } = await supabase.from('trips').upsert(row, { onConflict: 'id' });
-    if (error) {
-      console.error('Supabase Error:', error);
-    }
-  } catch (err) {
-    console.error('Supabase Error:', err);
-  }
-}
-
-/**
- * Real-time CRUD: Delete a trip directly in Supabase
- */
-export async function deleteTripFromSupabase(tripId: string): Promise<void> {
-  if (!isSupabaseConfigured()) return;
-  try {
-    const { error } = await supabase.from('trips').delete().eq('id', tripId);
-    if (error) {
-      console.error('Supabase Error:', error);
-    }
-  } catch (err) {
-    console.error('Supabase Error:', err);
-  }
-}
-
-/**
- * Real-time CRUD: Add or update a trip expense directly in Supabase
- */
-export async function insertOrUpdateTripExpenseInSupabase(expense: TripExpense): Promise<void> {
-  if (!isSupabaseConfigured()) return;
-  try {
-    const row = mapTripExpenseToRow(expense);
-    const { error } = await supabase.from('trip_expenses').upsert(row, { onConflict: 'id' });
-    if (error) {
-      console.error('Supabase Error:', error);
-    }
-  } catch (err) {
-    console.error('Supabase Error:', err);
-  }
-}
-
-/**
- * Real-time CRUD: Delete a trip expense directly in Supabase
- */
-export async function deleteTripExpenseFromSupabase(expenseId: string): Promise<void> {
-  if (!isSupabaseConfigured()) return;
-  try {
-    const { error } = await supabase.from('trip_expenses').delete().eq('id', expenseId);
-    if (error) {
-      console.error('Supabase Error:', error);
-    }
-  } catch (err) {
-    console.error('Supabase Error:', err);
-  }
-}
-
-/**
- * Real-time CRUD: Add or update a trip settlement directly in Supabase
- */
-export async function insertOrUpdateTripSettlementInSupabase(
-  settlement: TripSettlement
-): Promise<void> {
-  if (!isSupabaseConfigured()) return;
-  try {
-    const row = mapTripSettlementToRow(settlement);
-    const { error } = await supabase.from('trip_settlements').upsert(row, { onConflict: 'id' });
-    if (error) {
-      console.error('Supabase Error:', error);
-    }
-  } catch (err) {
-    console.error('Supabase Error:', err);
   }
 }
 

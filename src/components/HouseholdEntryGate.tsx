@@ -74,7 +74,7 @@ export function HouseholdEntryGate({ onAuthenticated }: HouseholdEntryGateProps)
               Household Passcode
             </h1>
             <p className="text-xs text-slate-400 mt-1">
-              Restricted to Bunny &amp; Monkey Co-Op
+              Bunny &amp; Monkey Family Budget Tool
             </p>
           </div>
         </div>
@@ -146,7 +146,7 @@ export function HouseholdEntryGate({ onAuthenticated }: HouseholdEntryGateProps)
         <div className="mt-6 pt-4 border-t border-white/10 text-center">
           <div className="flex items-center justify-center gap-1.5 text-[11px] text-slate-400">
             <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
-            <span>Encrypted Dual-Earner Session</span>
+            <span>Secure Household Session</span>
           </div>
         </div>
       </div>
