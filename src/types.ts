@@ -34,7 +34,10 @@ export interface HouseholdExpense {
   customBunnyPercent?: number; // e.g. 60
   customMonkeyPercent?: number; // e.g. 40
   fixedPayer?: 'bunny' | 'monkey'; // which partner pays a fixed dollar amount
+  fixedPartner?: 'Bunny' | 'Monkey'; // partner designated with the fixed share
   fixedAmount?: number; // the fixed dollar amount paid (remainder to other partner)
+  bunnyShare?: number; // exact calculated or stored Bunny share
+  monkeyShare?: number; // exact calculated or stored Monkey share
   notes?: string;
 }
 

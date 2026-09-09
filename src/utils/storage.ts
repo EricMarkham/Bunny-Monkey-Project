@@ -34,10 +34,25 @@ export function sanitizeAndMigrateState(parsed: any): HouseholdState {
       monkey: { ...initialHouseholdState.partners.monkey, ...(parsed.partners?.monkey || {}) },
     },
     expenses: (Array.isArray(parsed.expenses) ? parsed.expenses : initialHouseholdState.expenses).map(
-      (exp: any) => ({
-        ...exp,
-        id: ensureValidUUID(exp?.id),
-      })
+      (exp: any) => {
+        const partner = (exp.fixedPartner || (exp.fixedPayer === 'monkey' ? 'Monkey' : 'Bunny'));
+        const isMonkey = String(partner).toLowerCase() === 'monkey';
+        const fixedPartner: 'Bunny' | 'Monkey' = isMonkey ? 'Monkey' : 'Bunny';
+        const fixedAmount =
+          exp.fixedAmount !== undefined && !isNaN(Number(exp.fixedAmount))
+            ? Number(exp.fixedAmount)
+            : isMonkey
+            ? (exp.monkeyShare !== undefined ? Number(exp.monkeyShare) : undefined)
+            : (exp.bunnyShare !== undefined ? Number(exp.bunnyShare) : undefined);
+
+        return {
+          ...exp,
+          id: ensureValidUUID(exp?.id),
+          fixedPartner,
+          fixedPayer: isMonkey ? 'monkey' : 'bunny',
+          fixedAmount,
+        };
+      }
     ),
     sinkingFunds: Array.isArray(parsed.sinkingFunds)
       ? parsed.sinkingFunds

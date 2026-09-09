@@ -258,6 +258,40 @@ export function BudgetModule({
     if (!newExpTitle.trim() || isNaN(amount) || amount <= 0) return;
 
     const expenseId = generateUUID();
+    const fixedPartner: 'Bunny' | 'Monkey' = newExpFixedPayer === 'monkey' ? 'Monkey' : 'Bunny';
+    const enteredFixedAmount = parseFloat(newExpFixedAmount);
+    const fixedAmountVal =
+      newExpSplitMethod === 'fixed_dollar' && !isNaN(enteredFixedAmount) && enteredFixedAmount >= 0
+        ? enteredFixedAmount
+        : undefined;
+
+    let bShare = 0;
+    let mShare = 0;
+
+    if (newExpSplitMethod === 'fixed_dollar') {
+      const fixedAmt = fixedAmountVal ?? 0;
+      if (fixedPartner === 'Monkey') {
+        mShare = Math.min(amount, fixedAmt);
+        bShare = Math.max(0, amount - mShare);
+      } else {
+        bShare = Math.min(amount, fixedAmt);
+        mShare = Math.max(0, amount - bShare);
+      }
+    } else if (newExpSplitMethod === 'equal') {
+      bShare = amount * 0.5;
+      mShare = amount * 0.5;
+    } else if (newExpSplitMethod === 'custom') {
+      const bPercent = (parseFloat(newExpCustomBunny) || 50) / 100;
+      bShare = amount * bPercent;
+      mShare = amount * (1 - bPercent);
+    } else {
+      bShare = amount * summary.bunnyRatio;
+      mShare = amount * summary.monkeyRatio;
+    }
+
+    const calculatedBunnyShare = Math.round(bShare * 100) / 100;
+    const calculatedMonkeyShare = Math.round(mShare * 100) / 100;
+
     const newExpense: HouseholdExpense = {
       id: expenseId,
       title: newExpTitle.trim(),
@@ -270,8 +304,10 @@ export function BudgetModule({
       customMonkeyPercent:
         newExpSplitMethod === 'custom' ? 100 - (parseFloat(newExpCustomBunny) || 50) : undefined,
       fixedPayer: newExpSplitMethod === 'fixed_dollar' ? newExpFixedPayer : undefined,
-      fixedAmount:
-        newExpSplitMethod === 'fixed_dollar' ? parseFloat(newExpFixedAmount) || 0 : undefined,
+      fixedPartner: newExpSplitMethod === 'fixed_dollar' ? fixedPartner : undefined,
+      fixedAmount: fixedAmountVal,
+      bunnyShare: calculatedBunnyShare,
+      monkeyShare: calculatedMonkeyShare,
       notes: newExpNotes.trim() || undefined,
     };
 
@@ -290,6 +326,37 @@ export function BudgetModule({
 
         if (upsertError) {
           console.error("Expense Save Error:", upsertError);
+
+          // Retry without optional columns if remote schema lacks fixed_amount/fixed_partner:
+          if (payload.fixed_amount !== undefined || payload.fixed_partner !== undefined) {
+            const corePayload: SupabaseExpenseRow = {
+              id: payload.id,
+              item: payload.item,
+              category: payload.category,
+              type: payload.type,
+              split_logic: payload.split_logic,
+              monthly_cost: payload.monthly_cost,
+              bunny_share: payload.bunny_share,
+              monkey_share: payload.monkey_share,
+            };
+            const { error: coreError } = await supabase
+              .from('expenses')
+              .upsert(corePayload, { onConflict: 'id' });
+            if (!coreError) {
+              setSyncStatus('✓ Recurring bill saved to Supabase');
+              setTimeout(() => setSyncStatus(null), 3000);
+              setDbError(null);
+              // Reset
+              setNewExpTitle('');
+              setNewExpAmount('');
+              setNewExpNotes('');
+              setNewExpFixedPayer('bunny');
+              setNewExpFixedAmount('');
+              setShowAddExpenseModal(false);
+              return;
+            }
+          }
+
           // Fallback: If upsert constraint fails, attempt direct insert
           const { error: insertError } = await supabase
             .from('expenses')
@@ -352,8 +419,15 @@ export function BudgetModule({
     setEditExpIsFixed(exp.isFixed);
     setEditExpSplitMethod(exp.splitMethod);
     setEditExpCustomBunny((exp.customBunnyPercent ?? 50).toString());
-    setEditExpFixedPayer(exp.fixedPayer || 'bunny');
-    setEditExpFixedAmount(exp.fixedAmount !== undefined ? exp.fixedAmount.toString() : '');
+    const isMonkey = (exp.fixedPartner || exp.fixedPayer || '').toLowerCase() === 'monkey';
+    setEditExpFixedPayer(isMonkey ? 'monkey' : 'bunny');
+    const effectiveFixedAmt =
+      exp.fixedAmount !== undefined && !isNaN(Number(exp.fixedAmount))
+        ? exp.fixedAmount
+        : isMonkey
+        ? exp.monkeyShare
+        : exp.bunnyShare;
+    setEditExpFixedAmount(effectiveFixedAmt !== undefined && effectiveFixedAmt !== null ? effectiveFixedAmt.toString() : '');
     setEditExpNotes(exp.notes || '');
   };
 
@@ -364,6 +438,40 @@ export function BudgetModule({
     if (!editExpTitle.trim() || isNaN(amount) || amount <= 0) return;
 
     const validId = ensureValidUUID(editingExpense.id);
+    const fixedPartner: 'Bunny' | 'Monkey' = editExpFixedPayer === 'monkey' ? 'Monkey' : 'Bunny';
+    const enteredFixedAmount = parseFloat(editExpFixedAmount);
+    const fixedAmountVal =
+      editExpSplitMethod === 'fixed_dollar' && !isNaN(enteredFixedAmount) && enteredFixedAmount >= 0
+        ? enteredFixedAmount
+        : undefined;
+
+    let bShare = 0;
+    let mShare = 0;
+
+    if (editExpSplitMethod === 'fixed_dollar') {
+      const fixedAmt = fixedAmountVal ?? 0;
+      if (fixedPartner === 'Monkey') {
+        mShare = Math.min(amount, fixedAmt);
+        bShare = Math.max(0, amount - mShare);
+      } else {
+        bShare = Math.min(amount, fixedAmt);
+        mShare = Math.max(0, amount - bShare);
+      }
+    } else if (editExpSplitMethod === 'equal') {
+      bShare = amount * 0.5;
+      mShare = amount * 0.5;
+    } else if (editExpSplitMethod === 'custom') {
+      const bPercent = (parseFloat(editExpCustomBunny) || 50) / 100;
+      bShare = amount * bPercent;
+      mShare = amount * (1 - bPercent);
+    } else {
+      bShare = amount * summary.bunnyRatio;
+      mShare = amount * summary.monkeyRatio;
+    }
+
+    const calculatedBunnyShare = Math.round(bShare * 100) / 100;
+    const calculatedMonkeyShare = Math.round(mShare * 100) / 100;
+
     const updatedExpense: HouseholdExpense = {
       ...editingExpense,
       id: validId,
@@ -377,8 +485,10 @@ export function BudgetModule({
       customMonkeyPercent:
         editExpSplitMethod === 'custom' ? 100 - (parseFloat(editExpCustomBunny) || 50) : undefined,
       fixedPayer: editExpSplitMethod === 'fixed_dollar' ? editExpFixedPayer : undefined,
-      fixedAmount:
-        editExpSplitMethod === 'fixed_dollar' ? parseFloat(editExpFixedAmount) || 0 : undefined,
+      fixedPartner: editExpSplitMethod === 'fixed_dollar' ? fixedPartner : undefined,
+      fixedAmount: fixedAmountVal,
+      bunnyShare: calculatedBunnyShare,
+      monkeyShare: calculatedMonkeyShare,
       notes: editExpNotes.trim() || undefined,
     };
 
@@ -399,6 +509,31 @@ export function BudgetModule({
 
         if (upsertError) {
           console.error("Expense Save Error:", upsertError);
+
+          // Retry without optional columns if remote schema lacks fixed_amount/fixed_partner:
+          if (payload.fixed_amount !== undefined || payload.fixed_partner !== undefined) {
+            const corePayload: SupabaseExpenseRow = {
+              id: payload.id,
+              item: payload.item,
+              category: payload.category,
+              type: payload.type,
+              split_logic: payload.split_logic,
+              monthly_cost: payload.monthly_cost,
+              bunny_share: payload.bunny_share,
+              monkey_share: payload.monkey_share,
+            };
+            const { error: coreError } = await supabase
+              .from('expenses')
+              .upsert(corePayload, { onConflict: 'id' });
+            if (!coreError) {
+              setSyncStatus('✓ Expense updated in Supabase');
+              setTimeout(() => setSyncStatus(null), 3000);
+              setDbError(null);
+              setEditingExpense(null);
+              return;
+            }
+          }
+
           // Fallback: If upsert constraint fails, attempt direct update
           const { error: updateError } = await supabase
             .from('expenses')
@@ -1297,13 +1432,22 @@ export function BudgetModule({
                       {exp.splitMethod === 'proportional' && 'Proportional'}
                       {exp.splitMethod === 'equal' && '50 / 50'}
                       {exp.splitMethod === 'custom' && `Custom (${exp.customBunnyPercent || 50}% B)`}
-                      {exp.splitMethod === 'fixed_dollar' && (
-                        <span className="inline-flex items-center gap-1 text-[10px] 2xl:text-xs font-semibold text-amber-300 bg-amber-500/10 border border-amber-500/20 px-2 py-0.5 rounded-md">
-                          {exp.fixedPayer === 'monkey'
-                            ? `🐵 Fixed ${formatCurrency(exp.fixedAmount || 0)}`
-                            : `🐰 Fixed ${formatCurrency(exp.fixedAmount || 0)}`}
-                        </span>
-                      )}
+                      {exp.splitMethod === 'fixed_dollar' && (() => {
+                        const isMonkey = (exp.fixedPartner || exp.fixedPayer || '').toLowerCase() === 'monkey';
+                        const displayAmt =
+                          exp.fixedAmount !== undefined && exp.fixedAmount > 0
+                            ? exp.fixedAmount
+                            : isMonkey
+                            ? (exp.monkeyShare ?? alloc.monkeyShare ?? 0)
+                            : (exp.bunnyShare ?? alloc.bunnyShare ?? 0);
+                        return (
+                          <span className="inline-flex items-center gap-1 text-[10px] 2xl:text-xs font-semibold text-amber-300 bg-amber-500/10 border border-amber-500/20 px-2 py-0.5 rounded-md">
+                            {isMonkey
+                              ? `🐵 Fixed ${formatCurrency(displayAmt)}`
+                              : `🐰 Fixed ${formatCurrency(displayAmt)}`}
+                          </span>
+                        );
+                      })()}
                     </td>
                     <td className="py-3 2xl:py-4 px-3 2xl:px-4 text-right font-mono font-bold text-white text-xs 2xl:text-sm">
                       {formatCurrency(exp.monthlyAmount)}

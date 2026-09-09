@@ -79,14 +79,33 @@ export function calculateExpenseAllocation(
     bunnyShare = expense.monthlyAmount * bPercent;
     monkeyShare = expense.monthlyAmount * (1 - bPercent);
   } else if (expense.splitMethod === 'fixed_dollar') {
-    const fixedAmt = Math.max(0, expense.fixedAmount ?? 0);
-    if (expense.fixedPayer === 'monkey') {
+    const fixedPartner = (expense.fixedPartner || (expense.fixedPayer === 'monkey' ? 'Monkey' : 'Bunny'));
+    const isMonkey = String(fixedPartner).toLowerCase() === 'monkey';
+
+    // Check fixed_amount or infer from stored shares
+    const hasExplicitFixed = expense.fixedAmount !== undefined && !isNaN(Number(expense.fixedAmount));
+    const fixedAmt = hasExplicitFixed
+      ? Math.max(0, Number(expense.fixedAmount))
+      : isMonkey
+      ? Math.max(0, Number(expense.monkeyShare ?? 0))
+      : Math.max(0, Number(expense.bunnyShare ?? 0));
+
+    if (isMonkey) {
+      // If fixed_partner === 'Monkey', set Monkey = fixed_amount and Bunny = amount - fixed_amount
       monkeyShare = Math.min(expense.monthlyAmount, fixedAmt);
       bunnyShare = Math.max(0, expense.monthlyAmount - monkeyShare);
     } else {
-      // Default: Bunny pays fixed amount, remainder to Monkey
+      // If fixed_partner === 'Bunny', set Bunny = fixed_amount and Monkey = amount - fixed_amount
       bunnyShare = Math.min(expense.monthlyAmount, fixedAmt);
       monkeyShare = Math.max(0, expense.monthlyAmount - bunnyShare);
+    }
+
+    // Preserve stored bunny_share and monkey_share values if fixedAmt was 0 but valid stored shares exist
+    if (fixedAmt === 0 && (expense.bunnyShare !== undefined || expense.monkeyShare !== undefined)) {
+      if ((expense.bunnyShare ?? 0) > 0 || (expense.monkeyShare ?? 0) > 0) {
+        bunnyShare = Number(expense.bunnyShare ?? Math.max(0, expense.monthlyAmount - (expense.monkeyShare ?? 0)));
+        monkeyShare = Number(expense.monkeyShare ?? Math.max(0, expense.monthlyAmount - bunnyShare));
+      }
     }
   }
 

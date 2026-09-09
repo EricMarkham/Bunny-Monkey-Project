@@ -199,6 +199,8 @@ export interface SupabaseExpenseRow {
   monthly_cost: number;
   bunny_share: number;
   monkey_share: number;
+  fixed_amount?: number;
+  fixed_partner?: string;
 }
 
 export function setKnownExpenseColumns(_columns: string[]) {
@@ -234,19 +236,27 @@ export function mapRowToExpense(row: any): HouseholdExpense {
     splitMethod = 'equal';
   } else if (rawSplit.includes('custom')) {
     splitMethod = 'custom';
-  } else if (rawSplit.includes('fixed') && rawSplit.includes('dollar')) {
+  } else if (rawSplit.includes('fixed') || rawSplit.includes('dollar') || rawSplit.includes('alloc')) {
     splitMethod = 'fixed_dollar';
   } else {
     splitMethod = 'proportional';
   }
 
+  // Preserve stored bunny_share and monkey_share from database
+  const storedBunnyShare =
+    row.bunny_share !== undefined && row.bunny_share !== null && !isNaN(Number(row.bunny_share))
+      ? Number(row.bunny_share)
+      : undefined;
+  const storedMonkeyShare =
+    row.monkey_share !== undefined && row.monkey_share !== null && !isNaN(Number(row.monkey_share))
+      ? Number(row.monkey_share)
+      : undefined;
+
   let customBunnyPercent: number | undefined = undefined;
   let customMonkeyPercent: number | undefined = undefined;
   if (splitMethod === 'custom') {
-    const bShare = Number(row.bunny_share);
-    const mShare = Number(row.monkey_share);
-    if (!isNaN(bShare) && !isNaN(mShare) && bShare + mShare > 0) {
-      customBunnyPercent = Math.round((bShare / (bShare + mShare)) * 100);
+    if (storedBunnyShare !== undefined && storedMonkeyShare !== undefined && storedBunnyShare + storedMonkeyShare > 0) {
+      customBunnyPercent = Math.round((storedBunnyShare / (storedBunnyShare + storedMonkeyShare)) * 100);
       customMonkeyPercent = 100 - customBunnyPercent;
     } else if (row.customBunnyPercent !== undefined) {
       customBunnyPercent = Number(row.customBunnyPercent);
@@ -254,8 +264,51 @@ export function mapRowToExpense(row: any): HouseholdExpense {
     }
   }
 
+  // Determine fixed partner ('Bunny' or 'Monkey')
+  const rawPartner = String(
+    row.fixed_partner ?? row.fixed_payer ?? row.fixedPayer ?? row.fixedPartner ?? ''
+  ).trim().toLowerCase();
+  const fixedPartner: 'Bunny' | 'Monkey' = rawPartner.includes('monkey') ? 'Monkey' : 'Bunny';
+
+  // Determine fixed dollar amount
+  let fixedAmount: number | undefined = undefined;
+  if (row.fixed_amount !== undefined && row.fixed_amount !== null && !isNaN(Number(row.fixed_amount))) {
+    fixedAmount = Number(row.fixed_amount);
+  } else if (row.fixedAmount !== undefined && row.fixedAmount !== null && !isNaN(Number(row.fixedAmount))) {
+    fixedAmount = Number(row.fixedAmount);
+  } else if (splitMethod === 'fixed_dollar') {
+    // Rehydrate fixed amount from stored shares if explicit column was absent
+    if (fixedPartner === 'Monkey' && storedMonkeyShare !== undefined && storedMonkeyShare > 0) {
+      fixedAmount = storedMonkeyShare;
+    } else if (storedBunnyShare !== undefined && storedBunnyShare > 0) {
+      fixedAmount = storedBunnyShare;
+    } else if (storedMonkeyShare !== undefined && storedMonkeyShare > 0) {
+      fixedAmount = storedMonkeyShare;
+    }
+  }
+
+  // Evaluate dynamic split calculations on mount or preserve stored values
+  let bunnyShare = storedBunnyShare;
+  let monkeyShare = storedMonkeyShare;
+
+  if (splitMethod === 'fixed_dollar') {
+    if (fixedAmount !== undefined) {
+      if (fixedPartner === 'Bunny') {
+        bunnyShare = Math.min(monthlyAmount, fixedAmount);
+        monkeyShare = Math.max(0, monthlyAmount - bunnyShare);
+      } else {
+        monkeyShare = Math.min(monthlyAmount, fixedAmount);
+        bunnyShare = Math.max(0, monthlyAmount - monkeyShare);
+      }
+    } else if (storedBunnyShare !== undefined && storedMonkeyShare !== undefined) {
+      bunnyShare = storedBunnyShare;
+      monkeyShare = storedMonkeyShare;
+      fixedAmount = fixedPartner === 'Monkey' ? storedMonkeyShare : storedBunnyShare;
+    }
+  }
+
   return {
-    id: String(row.id),
+    id: ensureValidUUID(String(row.id)),
     title: title || 'Expense',
     category,
     isFixed,
@@ -263,21 +316,18 @@ export function mapRowToExpense(row: any): HouseholdExpense {
     splitMethod,
     customBunnyPercent,
     customMonkeyPercent,
-    fixedPayer: row.fixed_payer ?? row.fixedPayer,
-    fixedAmount:
-      row.fixed_amount !== undefined
-        ? Number(row.fixed_amount)
-        : row.fixedAmount !== undefined
-        ? Number(row.fixedAmount)
-        : undefined,
+    fixedPayer: fixedPartner === 'Monkey' ? 'monkey' : 'bunny',
+    fixedPartner,
+    fixedAmount,
+    bunnyShare,
+    monkeyShare,
     notes: row.notes || undefined,
   };
 }
 
 /**
- * Maps HouseholdExpense to a Supabase row payload matching table columns exactly:
- * id, item, category, type, split_logic, monthly_cost, bunny_share, monkey_share.
- * Excludes any non-table fields (custom_bunny_percent, notes, etc.) to prevent schema mismatch errors.
+ * Maps HouseholdExpense to a Supabase row payload matching database expectations:
+ * id, item, category, type, split_logic, monthly_cost, bunny_share, monkey_share, fixed_amount, fixed_partner.
  */
 export function mapExpenseToRow(
   exp: any,
@@ -302,8 +352,8 @@ export function mapExpenseToRow(
     splitLogic = 'Equal';
   } else if (rawSplit.includes('custom')) {
     splitLogic = 'Custom';
-  } else if (rawSplit.includes('fixed') && rawSplit.includes('dollar')) {
-    splitLogic = 'Fixed Dollar';
+  } else if (rawSplit.includes('fixed') || rawSplit.includes('dollar') || rawSplit.includes('alloc')) {
+    splitLogic = 'Fixed $ Allocation';
   } else {
     splitLogic = 'Proportional';
   }
@@ -312,19 +362,47 @@ export function mapExpenseToRow(
     (Number(exp.monthly_cost ?? exp.amount ?? exp.monthly_amount ?? exp.monthlyAmount ?? 0) || 0) * 100
   ) / 100;
 
-  // Compute bunny_share and monkey_share based on partner income split
+  // Partner income ratio for proportional split
   const bunnyRatio = partners
     ? partners.bunny.netMonthlyIncome /
       ((partners.bunny.netMonthlyIncome + partners.monkey.netMonthlyIncome) || 1)
     : 7650 / 16100;
   const monkeyRatio = 1 - bunnyRatio;
 
+  const rawPartner = String(
+    exp.fixed_partner ?? exp.fixedPartner ?? exp.fixed_payer ?? exp.fixedPayer ?? 'Bunny'
+  ).toLowerCase();
+  const fixedPartner: 'Bunny' | 'Monkey' = rawPartner.includes('monkey') ? 'Monkey' : 'Bunny';
+
+  const rawFixedAmt = exp.fixed_amount !== undefined
+    ? Number(exp.fixed_amount)
+    : exp.fixedAmount !== undefined
+    ? Number(exp.fixedAmount)
+    : undefined;
+
   let bShare = 0;
   let mShare = 0;
 
-  if (splitLogic === 'Proportional') {
-    bShare = monthlyCost * bunnyRatio;
-    mShare = monthlyCost * monkeyRatio;
+  if (splitLogic === 'Fixed $ Allocation') {
+    const fixedAmt = rawFixedAmt !== undefined && !isNaN(rawFixedAmt)
+      ? Math.max(0, rawFixedAmt)
+      : fixedPartner === 'Monkey'
+      ? Math.max(0, Number(exp.monkeyShare ?? exp.monkey_share ?? 0))
+      : Math.max(0, Number(exp.bunnyShare ?? exp.bunny_share ?? 0));
+
+    if (fixedPartner === 'Monkey') {
+      mShare = Math.min(monthlyCost, fixedAmt);
+      bShare = Math.max(0, monthlyCost - mShare);
+    } else {
+      bShare = Math.min(monthlyCost, fixedAmt);
+      mShare = Math.max(0, monthlyCost - bShare);
+    }
+
+    // If explicit pre-calculated shares were provided, preserve them
+    if (exp.bunnyShare !== undefined && exp.monkeyShare !== undefined) {
+      bShare = Number(exp.bunnyShare);
+      mShare = Number(exp.monkeyShare);
+    }
   } else if (splitLogic === 'Equal') {
     bShare = monthlyCost * 0.5;
     mShare = monthlyCost * 0.5;
@@ -332,16 +410,8 @@ export function mapExpenseToRow(
     const bPercent = (Number(exp.customBunnyPercent ?? exp.custom_bunny_percent) || 50) / 100;
     bShare = monthlyCost * bPercent;
     mShare = monthlyCost * (1 - bPercent);
-  } else if (splitLogic === 'Fixed Dollar') {
-    const fixedAmt = Math.max(0, Number(exp.fixedAmount ?? exp.fixed_amount ?? 0));
-    if (exp.fixedPayer === 'monkey') {
-      mShare = Math.min(monthlyCost, fixedAmt);
-      bShare = Math.max(0, monthlyCost - mShare);
-    } else {
-      bShare = Math.min(monthlyCost, fixedAmt);
-      mShare = Math.max(0, monthlyCost - bShare);
-    }
   } else {
+    // Proportional default
     bShare = monthlyCost * bunnyRatio;
     mShare = monthlyCost * monkeyRatio;
   }
@@ -349,8 +419,7 @@ export function mapExpenseToRow(
   const bunny_share = Math.round(bShare * 100) / 100;
   const monkey_share = Math.round(mShare * 100) / 100;
 
-  // Strictly exact schema: id, item, category, type, split_logic, monthly_cost, bunny_share, monkey_share
-  return {
+  const payload: SupabaseExpenseRow = {
     id,
     item: title || 'Expense',
     category,
@@ -360,6 +429,13 @@ export function mapExpenseToRow(
     bunny_share,
     monkey_share,
   };
+
+  if (splitLogic === 'Fixed $ Allocation' || rawFixedAmt !== undefined) {
+    payload.fixed_amount = rawFixedAmt !== undefined ? rawFixedAmt : (fixedPartner === 'Monkey' ? monkey_share : bunny_share);
+    payload.fixed_partner = fixedPartner;
+  }
+
+  return payload;
 }
 
 /**
@@ -865,6 +941,26 @@ export async function insertOrUpdateExpenseInSupabase(
 
     if (upsertError) {
       console.error("Expense Save Error:", upsertError);
+
+      // If error might be due to optional columns (fixed_amount / fixed_partner) missing in remote schema:
+      if (payload.fixed_amount !== undefined || payload.fixed_partner !== undefined) {
+        const corePayload: SupabaseExpenseRow = {
+          id: payload.id,
+          item: payload.item,
+          category: payload.category,
+          type: payload.type,
+          split_logic: payload.split_logic,
+          monthly_cost: payload.monthly_cost,
+          bunny_share: payload.bunny_share,
+          monkey_share: payload.monkey_share,
+        };
+        const { error: coreUpsertError } = await supabase
+          .from('expenses')
+          .upsert(corePayload, { onConflict: 'id' });
+        if (!coreUpsertError) {
+          return;
+        }
+      }
 
       // Fallback: If upsert failed, attempt update by 'id'
       const { data: updateData, error: updateError } = await supabase
